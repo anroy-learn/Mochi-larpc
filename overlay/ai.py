@@ -3,6 +3,7 @@ import re
 import asyncio
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple, List
 from pydantic import BaseModel, Field
@@ -38,11 +39,17 @@ class GeminiPetAI:
         self.api_key = ""
         self.is_offline = True
         self.local_only = False
+        self.executor = ThreadPoolExecutor(max_workers=4)
         
         # In-memory LRU cache for judge verdicts: (url_path, title, goal) -> (verdict, reason)
         self.judge_cache: Dict[Tuple[str, str, str], Tuple[str, str]] = {}
 
         self._init_env_and_client()
+
+    async def _run_sync(self, fn, *args):
+        """Runs a blocking synchronous function on our dedicated thread pool without stdlib lazy_import bugs."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(self.executor, fn, *args)
 
     def _init_env_and_client(self) -> None:
         """Reads .env safely without logging or printing secrets."""
@@ -190,11 +197,12 @@ class GeminiPetAI:
             # Retry once on malformed JSON or transient failure
             for attempt in range(2):
                 try:
-                    resp = await asyncio.to_thread(
-                        self.client.models.generate_content,
-                        model=self.model_name or "gemini-3.5-flash-lite",
-                        contents=prompt,
-                        config=config
+                    resp = await self._run_sync(
+                        lambda: self.client.models.generate_content(
+                            model=self.model_name or "gemini-3.5-flash-lite",
+                            contents=prompt,
+                            config=config
+                        )
                     )
                     text = resp.text.strip()
                     data = json.loads(text)
@@ -220,6 +228,8 @@ class GeminiPetAI:
                 "offline": True
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"[TabPet AI] Judge call failed: {e}. Using offline fallback.")
             return {
                 "verdict": "block",
@@ -266,10 +276,11 @@ class GeminiPetAI:
         )
 
         async def _call_gemini():
-            resp = await asyncio.to_thread(
-                self.client.models.generate_content,
-                model=self.model_name or "gemini-3.5-flash-lite",
-                contents=prompt
+            resp = await self._run_sync(
+                lambda: self.client.models.generate_content(
+                    model=self.model_name or "gemini-3.5-flash-lite",
+                    contents=prompt
+                )
             )
             raw = resp.text.strip().replace('"', '').replace('\n', ' ')
             words = raw.split()
@@ -360,11 +371,12 @@ class GeminiPetAI:
         async def _call_gemini():
             for attempt in range(2):
                 try:
-                    resp = await asyncio.to_thread(
-                        self.client.models.generate_content,
-                        model=self.model_name or "gemini-3.5-flash-lite",
-                        contents=prompt,
-                        config=config
+                    resp = await self._run_sync(
+                        lambda: self.client.models.generate_content(
+                            model=self.model_name or "gemini-3.5-flash-lite",
+                            contents=prompt,
+                            config=config
+                        )
                     )
                     text = resp.text.strip()
                     data = json.loads(text)
@@ -402,6 +414,8 @@ class GeminiPetAI:
                 "offline": False
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             print(f"[TabPet AI] Plea judgment error or timeout: {e}. Using offline fallback.")
             new_trust = self.memory.update_trust(-1)
             return {
