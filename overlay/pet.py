@@ -120,6 +120,7 @@ class ProceduralPet:
         # Mood & Speech bubble
         self.mood: str = "neutral"  # "proud" | "neutral" | "suspicious"
         self.speech_bubble_text: str = ""
+        self.speech_bubble_offline: bool = False
         self.speech_bubble_timer: float = 0.0
         self.speech_bubble_alpha: float = 0.0
 
@@ -127,9 +128,10 @@ class ProceduralPet:
         self.on_reach_target = None
         self.on_pounce_complete = None
 
-    def show_speech(self, text: str, duration: float = 3.5) -> None:
+    def show_speech(self, text: str, is_offline: bool = False, duration: float = 4.0) -> None:
         """Displays a speech bubble with the roast above the pet."""
         self.speech_bubble_text = text
+        self.speech_bubble_offline = is_offline
         self.speech_bubble_timer = duration
         self.speech_bubble_alpha = 1.0
 
@@ -517,8 +519,8 @@ class ProceduralPet:
         painter.save()
         alpha = int(255 * self.speech_bubble_alpha)
 
-        bw = 190.0
-        bh = 46.0
+        bw = 196.0
+        bh = 54.0
         bx = self.x - (bw / 2.0)
         by = self.y - self.height - bh - 14.0
 
@@ -545,11 +547,24 @@ class ProceduralPet:
         painter.drawLine(QPointF(self.x - 6.0, by + bh), QPointF(self.x, by + bh + 7.0))
         painter.drawLine(QPointF(self.x + 6.0, by + bh), QPointF(self.x, by + bh + 7.0))
 
-        # Text
+        # Small discrete offline mode label if AI was unavailable
+        if self.speech_bubble_offline:
+            font_tag = QFont("Helvetica", 7, QFont.Weight.DemiBold)
+            painter.setFont(font_tag)
+            painter.setPen(QColor(135, 142, 153, alpha))
+            tag_rect = QRectF(bx + bw - 74, by + 3, 68, 11)
+            painter.drawText(
+                tag_rect,
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                "offline mode"
+            )
+
+        # Roast Text
         painter.setPen(QColor(25, 30, 36, alpha))
         font = QFont("Helvetica", 9, QFont.Weight.Bold)
         painter.setFont(font)
-        text_rect = QRectF(bx + 8, by + 4, bw - 16, bh - 8)
+        top_offset = 6.0 if self.speech_bubble_offline else 4.0
+        text_rect = QRectF(bx + 8, by + top_offset, bw - 16, bh - top_offset - 4)
         painter.drawText(
             text_rect,
             Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,

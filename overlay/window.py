@@ -5,8 +5,8 @@ import threading
 from collections import deque
 from typing import Optional, Tuple, Deque
 
-from PySide6.QtCore import Qt, QTimer, QPoint, Slot
-from PySide6.QtGui import QPainter, QMouseEvent
+from PySide6.QtCore import Qt, QTimer, QPoint, Slot, QRect
+from PySide6.QtGui import QPainter, QMouseEvent, QRegion
 from PySide6.QtWidgets import QWidget
 
 from overlay.pet import ProceduralPet, PetState
@@ -37,6 +37,14 @@ class BlockedTask:
         self.streak_days = streak_days
         self.goal = goal
         self.roast_text = ""
+        self.roast_offline = False
+
+        # Extract clean domain for prompt
+        clean = url.split("?")[0].split("#")[0]
+        if "//" in clean:
+            self.domain = clean.split("/")[2]
+        else:
+            self.domain = clean
 
 
 class PetOverlayWindow(QWidget):
@@ -53,7 +61,7 @@ class PetOverlayWindow(QWidget):
 
     PET_SIZE = 76  # Compact window dimension
     BUBBLE_WIDTH = 210
-    BUBBLE_HEIGHT = 120
+    BUBBLE_HEIGHT = 130
 
     def __init__(
         self,
@@ -191,15 +199,24 @@ class PetOverlayWindow(QWidget):
     # -------------------------------------------------------------
     # Roast Speech Bubble Expansion
     # -------------------------------------------------------------
-    def show_roast_bubble(self, roast_text: str, duration: float = 3.5) -> None:
+    def show_roast_bubble(self, roast_text: str, is_offline: bool = False, duration: float = 4.0) -> None:
         self.is_bubble_active = True
         self.setFixedSize(self.BUBBLE_WIDTH, self.BUBBLE_HEIGHT)
         self.pet.x = self.BUBBLE_WIDTH / 2.0
-        self.pet.y = 106.0
+        self.pet.y = 116.0
         self.pet.target_x = self.pet.x
         self.pet.target_y = self.pet.y
-        self.pet.show_speech(roast_text, duration=duration)
+        self.pet.show_speech(roast_text, is_offline=is_offline, duration=duration)
         self._apply_window_position()
+
+        # Mask so transparent areas outside pet and bubble pass through clicks to Chrome
+        bx = int(self.pet.x - 98.0)
+        by = int(self.pet.y - 34.0 - 54.0 - 14.0)
+        bubble_rect = QRect(max(0, bx - 2), max(0, by - 2), 200, 60)
+        tail_rect = QRect(int(self.pet.x - 12), by + 54, 24, 12)
+        pet_rect = QRect(int(self.pet.x - 32), int(self.pet.y - 42), 64, 52)
+        mask = QRegion(bubble_rect).united(QRegion(tail_rect)).united(QRegion(pet_rect))
+        self.setMask(mask)
 
         if self.bubble_shrink_timer:
             self.bubble_shrink_timer.stop()
@@ -211,6 +228,7 @@ class PetOverlayWindow(QWidget):
 
     def _shrink_bubble(self) -> None:
         self.is_bubble_active = False
+        self.clearMask()
         self.setFixedSize(self.PET_SIZE, self.PET_SIZE)
         self.pet.x = self.PET_SIZE / 2.0
         self.pet.y = 62.0
@@ -222,6 +240,16 @@ class PetOverlayWindow(QWidget):
     # Mouse Interactions: Petting and Dragging
     # -------------------------------------------------------------
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        if self.is_bubble_active:
+            # If user clicked on or near the speech bubble, dismiss it immediately
+            bx = int(self.pet.x - 98.0)
+            by = int(self.pet.y - 34.0 - 54.0 - 14.0)
+            bubble_area = QRect(bx - 2, by - 2, 200, 68)
+            if bubble_area.contains(pos):
+                self._shrink_bubble()
+                return
+
         if event.button() == Qt.MouseButton.LeftButton:
             self.pet.pet_touch()
             self.is_dragging = True
@@ -304,12 +332,23 @@ class PetOverlayWindow(QWidget):
         # Generate roast in background while pet walks
         if self.ai:
             def _async_roast():
-                loop = asyncio.new_event_loop()
-                roast = loop.run_until_complete(
-                    self.ai.generate_roast(title, blocks_today, streak_days, goal)
-                )
-                loop.close()
-                task.roast_text = roast
+                try:
+                    loop = asyncio.new_event_loop()
+                    roast, is_offline = loop.run_until_complete(
+                        self.ai.generate_roast(
+                            tab_title=title,
+                            tab_domain=task.domain,
+                            blocks_today=blocks_today,
+                            streak_days=streak_days,
+                            goal=goal
+                        )
+                    )
+                    loop.close()
+                    task.roast_text = roast
+                    task.roast_offline = is_offline
+                except Exception as e:
+                    print(f"[DesktopPet] Roast generation error: {e}")
+                    task.roast_offline = True
             threading.Thread(target=_async_roast, daemon=True).start()
 
         self.blocked_queue.append(task)
@@ -329,16 +368,20 @@ class PetOverlayWindow(QWidget):
         self.target_screen_x = self.chrome_left + tab_center_x - (self.PET_SIZE / 2.0)
 
         def on_pounce_finished():
-            roast = task.roast_text or "Distraction stomped! Back to work."
-            print(f"[DesktopPet] 💥 Stomped tab {task.tab_id}! Roast: {roast}")
+            roast = task.roast_text
+            is_offline = task.roast_offline
+            if not roast:
+                roast = "Distraction stomped! Back to work."
+                is_offline = True
+            print(f"[DesktopPet] 💥 Stomped tab {task.tab_id}! Roast: '{roast}' (offline={is_offline})")
             
-            # Show speech bubble above pet
-            self.show_roast_bubble(roast, duration=3.2)
+            # Show speech bubble above pet for ~4 seconds
+            self.show_roast_bubble(roast, is_offline=is_offline, duration=4.0)
 
             if self.server:
                 self.server.notify_tab_closed(task.tab_id, roast)
 
-            QTimer.singleShot(3400, self._process_next_blocked_tab)
+            QTimer.singleShot(4200, self._process_next_blocked_tab)
 
         self.pet.on_pounce_complete = on_pounce_finished
 

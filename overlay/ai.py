@@ -243,36 +243,50 @@ class GeminiPetAI:
     async def generate_roast(
         self,
         tab_title: str,
+        tab_domain: str,
         blocks_today: int,
         streak_days: int,
         goal: str
-    ) -> str:
+    ) -> Tuple[str, bool]:
         """
-        Generates a playful line (max 15 words) while pet walks to stomp tab.
+        Generates a playful, dramatic line (max 15 words) while pet walks to stomp tab.
         Strict Safety: No jokes about bodies, appearance, identity, or slurs.
-        Fallback: Canned playful lines.
+        Returns: (roast_text, is_offline)
         """
+        domain_name = tab_domain or "that tab"
         canned_roasts = [
-            f"Back to work! That tab wasn't helping with your goal.",
-            f"Caught red-pawed! Time to get back on track.",
-            f"Mochi says: no distractions allowed today!",
-            f"Block #{blocks_today}! Protect that {streak_days}-day streak.",
-            f"Nice try, but your goal needs your full attention!",
-            f"Nope! Stay focused on {goal or 'your tasks'}.",
-            f"Distraction stomped! Your future self will thank you."
+            f"Back to work! {domain_name} isn't helping with {goal or 'your goal'}.",
+            f"Caught red-pawed on {domain_name}! Back to {goal or 'focus'} you go.",
+            f"Mochi says: zero distractions! Stomped #{blocks_today} today.",
+            f"Block #{blocks_today}! Protect that glorious {streak_days}-day streak.",
+            f"Nice try browsing {domain_name}, but {goal or 'your goal'} awaits!",
+            f"Tab obliterated! Your {goal or 'task'} demanded my paws of justice.",
+            f"Distraction stomped into dust! Stay locked in on {goal or 'your goal'}.",
+            f"Did you really think I wouldn't notice {domain_name}? Back to work!",
+            f"Slacking detected on {domain_name}! Mochi's judgment is absolute.",
+            f"Another distraction falls! Keep your {streak_days}-day streak alive.",
+            f"Not on my watch! {domain_name} leads straight to procrastination.",
+            f"Begone, distraction! Your focus goal '{goal or 'work'}' is safe now.",
+            f"Stomp! That was block #{blocks_today}. Time to conquer {goal or 'today'}!",
+            f"A dramatic takedown of {domain_name}! Now let's see real progress.",
+            f"Distraction terminated! Mochi demands 100% focus on {goal or 'your goal'}.",
+            f"Zero tolerance for rabbit holes today! Back to {goal or 'your tasks'}."
         ]
 
         if self.local_only or self.is_offline or not self.client:
-            return random.choice(canned_roasts)
+            return random.choice(canned_roasts), True
 
         prompt = (
             f"You are Mochi the tab pet. You just stomped and closed a distracting tab.\n"
-            f"Tab Title: '{tab_title}'\n"
-            f"User Goal: '{goal or 'Focus'}'\n"
-            f"Blocks today: {blocks_today}, Streak: {streak_days} days.\n\n"
-            f"Write a single playful, sassy roast line (MAXIMUM 14 WORDS).\n"
-            f"STRICT SAFETY RULES: Lighthearted productivity banter only. "
-            f"NEVER make jokes about bodies, appearance, race, gender, identity, or use any insults/slurs."
+            f"Closed Tab Title: '{tab_title}'\n"
+            f"Closed Tab Domain: '{domain_name}'\n"
+            f"User's Focus Goal: '{goal or 'Focused study/work'}'\n"
+            f"Blocks today: {blocks_today}, Current streak: {streak_days} days.\n\n"
+            f"Write a single playful, slightly dramatic roast line (MAXIMUM 14 WORDS).\n"
+            f"STRICT SAFETY RULES:\n"
+            f"- Never joke about bodies, appearance, race, gender, identity, or use slurs.\n"
+            f"- Don't mention anything the user didn't give you.\n"
+            f"- Lighthearted productivity banter only."
         )
 
         async def _call_gemini():
@@ -291,9 +305,11 @@ class GeminiPetAI:
         try:
             # 2.0-second timeout guarantee
             roast = await asyncio.wait_for(_call_gemini(), timeout=2.0)
-            return roast if roast else random.choice(canned_roasts)
+            if roast:
+                return roast, False
+            return random.choice(canned_roasts), True
         except Exception:
-            return random.choice(canned_roasts)
+            return random.choice(canned_roasts), True
 
     # -------------------------------------------------------------
     # 3. Plea Bargain & Trust Scoring
