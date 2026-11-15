@@ -9,7 +9,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "host": "127.0.0.1",
     "port": 8765,
     "tab_offset_x": 75,       # Distance from window left to first tab (clears macOS traffic lights)
-    "tab_offset_y": 24,       # Vertical offset so pet rests directly on the tab bar line
+    "tab_offset_y": 18,       # Vertical offset so pet rests directly on the tab bar line
     "max_tab_width": 165,     # Standard Chrome tab width (~165px)
     "min_tab_width": 45,      # Minimum tab width when many tabs are open
     "tab_right_margin": 140,  # Space reserved for tab search, new tab (+), window controls

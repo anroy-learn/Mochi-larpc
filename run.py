@@ -48,6 +48,8 @@ def main():
     # Overlay Window
     window = PetOverlayWindow(config, bridge=bridge, server=server)
     window.show()
+    window.raise_()
+    window.activateWindow()
 
     calibration_dialog = None
     if args.calibrate:

@@ -46,7 +46,7 @@ class PetOverlayWindow(QWidget):
 
         # Chrome window reference
         self.chrome_left: int = 0
-        self.chrome_top: int = 22
+        self.chrome_top: int = int(self.config.get("tab_offset_y", 18))
         self.chrome_width: int = 1512
         self.tab_count: int = 1
         self.active_tab_index: int = 0
@@ -78,8 +78,10 @@ class PetOverlayWindow(QWidget):
     def _init_window(self) -> None:
         """Sets window flags for floating, transparent compact pet."""
         flags = (
-            Qt.WindowType.FramelessWindowHint
+            Qt.WindowType.ToolTip
+            | Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.NoDropShadowWindowHint
         )
         self.setWindowFlags(flags)
 
@@ -183,8 +185,8 @@ class PetOverlayWindow(QWidget):
     def on_bounds_received(self, left: int, top: int, width: int, height: int, tab_count: int) -> None:
         """Updated Chrome window position and dimensions."""
         self.chrome_left = max(0, left)
-        # Tab bar is directly under the menu bar on macOS (y ≈ 20-25)
-        self.chrome_top = 22
+        # Tab bar is directly under the menu bar on macOS
+        self.chrome_top = int(self.config.get("tab_offset_y", 18))
         self.chrome_width = max(300, width)
         self.tab_count = max(1, tab_count)
         self.screen_y = float(self.chrome_top)
