@@ -103,9 +103,9 @@ class GeminiPetAI:
                 if "flash" in clean_name.lower() and not "embed" in clean_name.lower():
                     candidates.append(clean_name)
 
-            # Prioritize latest flash models
-            selected = "gemini-2.5-flash"
-            for prio in ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]:
+            # Prioritize latest flash models (flash-lite for ultra-fast <1.2s response)
+            selected = "gemini-3.5-flash-lite"
+            for prio in ["gemini-3.5-flash-lite", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.8-flash"]:
                 if prio in candidates:
                     selected = prio
                     break
@@ -131,7 +131,7 @@ class GeminiPetAI:
                     new_lines.append(f"MODEL_NAME={selected}")
                 ENV_PATH.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
         except Exception as e:
-            self.model_name = "gemini-2.5-flash"
+            self.model_name = "gemini-3.5-flash-lite"
             print(f"[TabPet AI] Model discovery fallback to {self.model_name}: {e}")
 
     # -------------------------------------------------------------
@@ -192,7 +192,7 @@ class GeminiPetAI:
                 try:
                     resp = await asyncio.to_thread(
                         self.client.models.generate_content,
-                        model=self.model_name or "gemini-2.5-flash",
+                        model=self.model_name or "gemini-3.5-flash-lite",
                         contents=prompt,
                         config=config
                     )
@@ -268,7 +268,7 @@ class GeminiPetAI:
         async def _call_gemini():
             resp = await asyncio.to_thread(
                 self.client.models.generate_content,
-                model=self.model_name or "gemini-2.5-flash",
+                model=self.model_name or "gemini-3.5-flash-lite",
                 contents=prompt
             )
             raw = resp.text.strip().replace('"', '').replace('\n', ' ')
@@ -362,7 +362,7 @@ class GeminiPetAI:
                 try:
                     resp = await asyncio.to_thread(
                         self.client.models.generate_content,
-                        model=self.model_name or "gemini-2.5-flash",
+                        model=self.model_name or "gemini-3.5-flash-lite",
                         contents=prompt,
                         config=config
                     )
