@@ -1,0 +1,22 @@
+# Environment & Secrets
+.env
+.env.*
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+
+# macOS
+.DS_Store
+
+# Local session config
+data/
