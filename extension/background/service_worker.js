@@ -116,7 +116,7 @@ async function initWebSocket() {
     } catch (_) {}
   }
 
-  const wsUrl = `ws://127.0.0.1:${port}/ws${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+  const wsUrl = `ws://127.0.0.1:${port}/ws${authToken ? `?token=${encodeURIComponent(authToken)}` : ""}`;
   console.log(`[TabPet] Connecting to overlay: ${wsUrl}`);
 
   try {
