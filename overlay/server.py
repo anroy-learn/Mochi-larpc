@@ -150,18 +150,26 @@ class TabPetServer:
         port = int(self.config.get("port", 8765))
 
         def run_server():
-            self._loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(self._loop)
-            config = uvicorn.Config(
-                self.app,
-                host=host,
-                port=port,
-                log_level="warning",
-                access_log=False,
-                loop="asyncio",
-            )
-            server = uvicorn.Server(config)
-            self._loop.run_until_complete(server.serve())
+            try:
+                self._loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(self._loop)
+                config = uvicorn.Config(
+                    self.app,
+                    host=host,
+                    port=port,
+                    log_level="warning",
+                    access_log=False,
+                    loop="asyncio",
+                )
+                server = uvicorn.Server(config)
+                self._loop.run_until_complete(server.serve())
+            except OSError as e:
+                if "address already in use" in str(e).lower() or getattr(e, "errno", None) == 48:
+                    print(f"[Server] ⚠️ Notice: Port {port} is already in use by another instance. Reusing existing server.")
+                else:
+                    print(f"[Server] Server startup error: {e}")
+            except Exception as e:
+                print(f"[Server] Server thread exception: {e}")
 
         self._server_thread = threading.Thread(target=run_server, daemon=True, name="TabPetServerThread")
         self._server_thread.start()

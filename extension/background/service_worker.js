@@ -172,6 +172,7 @@ async function sendCurrentWindowBounds() {
   try {
     const win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
     if (!win || win.left === undefined) return;
+    if (win.state === "minimized" || win.left < -2000 || win.top < -2000 || win.width < 200) return;
 
     const tabs = win.tabs || [];
     const activeTab = tabs.find((t) => t.active);
