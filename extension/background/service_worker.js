@@ -75,6 +75,9 @@ chrome.runtime.onStartup.addListener(() => {
   initWebSocket();
 });
 
+// Immediate execution when service worker loads/wakes up
+initWebSocket();
+
 // -------------------------------------------------------------
 // 2. WebSocket Client
 // -------------------------------------------------------------
@@ -170,7 +173,11 @@ function handleServerMessage(msg) {
 // -------------------------------------------------------------
 async function sendCurrentWindowBounds() {
   try {
-    const win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
+    let win = await chrome.windows.getLastFocused({ populate: true, windowTypes: ["normal"] });
+    if (!win || win.left === undefined) {
+      const wins = await chrome.windows.getAll({ populate: true, windowTypes: ["normal"] });
+      win = wins && wins.length > 0 ? wins[0] : null;
+    }
     if (!win || win.left === undefined) return;
     if (win.state === "minimized" || win.left < -2000 || win.top < -2000 || win.width < 200) return;
 

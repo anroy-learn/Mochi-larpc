@@ -248,6 +248,7 @@ class PetOverlayWindow(QWidget):
         self.tab_count = max(1, tab_count)
 
         self.setGeometry(left, top, max(300, width), self.STRIP_HEIGHT)
+        self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
         self._update_click_mask()
 
     @Slot(int, int)

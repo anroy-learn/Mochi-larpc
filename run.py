@@ -8,6 +8,7 @@ from overlay.config import ConfigManager
 from overlay.server import ServerBridge, TabPetServer
 from overlay.window import PetOverlayWindow
 from overlay.calibration import CalibrationDialog
+from overlay.tracker import NativeChromeTracker
 
 
 def main():
@@ -35,6 +36,10 @@ def main():
 
     # Qt Signal Bridge
     bridge = ServerBridge()
+
+    # Native macOS Chrome tracker (auto-tracks Chrome even before extension connects)
+    tracker = NativeChromeTracker(bridge)
+    tracker.start()
 
     # FastAPI + WebSocket Server
     server = TabPetServer(config, bridge)
