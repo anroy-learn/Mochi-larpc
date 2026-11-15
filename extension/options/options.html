@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tab Pet - Settings</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="brand">
+        <span class="logo">🐾</span>
+        <div>
+          <h1>Tab Pet Settings</h1>
+          <p class="subtitle">Configure your focus guardian and blocked websites</p>
+        </div>
+      </div>
+    </header>
+
+    <div class="content-grid">
+      <!-- Blocklist Card -->
+      <section class="card">
+        <h2>🚫 Focus Blocklist</h2>
+        <p class="card-desc">
+          Paste the domains or URLs you want Tab Pet to close during Focus sessions (one per line).
+        </p>
+        <textarea id="blocklistInput" rows="9" placeholder="youtube.com&#10;reddit.com&#10;twitter.com&#10;x.com&#10;instagram.com"></textarea>
+      </section>
+
+      <!-- Pomodoro Card -->
+      <section class="card">
+        <h2>⏱️ Pomodoro Session Timers</h2>
+        <div class="field-row">
+          <label for="workDuration">Focus Length (minutes):</label>
+          <input type="number" id="workDuration" min="1" max="120" value="25">
+        </div>
+        <div class="field-row">
+          <label for="breakDuration">Break Length (minutes):</label>
+          <input type="number" id="breakDuration" min="1" max="60" value="5">
+        </div>
+
+        <h2 style="margin-top: 24px;">🔑 Desktop Overlay Auth Token</h2>
+        <p class="card-desc">
+          Matched automatically from your local Python server. You can also paste it manually from your terminal.
+        </p>
+        <div class="field-row">
+          <input type="password" id="authTokenInput" placeholder="Enter auth token from terminal">
+          <button id="showTokenBtn" type="button" class="small-btn">Show</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- Actions -->
+    <div class="actions">
+      <button id="saveBtn" class="primary-btn">Save Changes</button>
+      <span id="saveNotice" class="save-notice">Settings saved!</span>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

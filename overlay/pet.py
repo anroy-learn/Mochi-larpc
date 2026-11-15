@@ -109,6 +109,9 @@ class ProceduralPet:
         self.color_eyes = QColor("#1E272C")
         self.color_belly = QColor(255, 255, 255, 170)
 
+        # Sound toggle
+        self.sound_enabled: bool = True
+
         # Callbacks
         self.on_reach_target = None
         self.on_pounce_complete = None
@@ -351,6 +354,12 @@ class ProceduralPet:
                 self.state = PetState.SIT
                 self.state_time = 0.0
                 self.state_duration = 2.5
+                if self.sound_enabled:
+                    try:
+                        from PySide6.QtWidgets import QApplication
+                        QApplication.beep()
+                    except Exception:
+                        pass
                 if self.on_pounce_complete:
                     self.on_pounce_complete()
 

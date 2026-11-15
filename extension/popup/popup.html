@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Tab Pet - Pomodoro</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="pet-brand">
+        <span class="pet-icon">🐾</span>
+        <div>
+          <h1 class="brand-title">Tab Pet</h1>
+          <span id="connectionStatus" class="status-badge disconnected">Connecting...</span>
+        </div>
+      </div>
+      <a href="../options/options.html" target="_blank" class="gear-btn" title="Settings">⚙️</a>
+    </header>
+
+    <!-- Timer Card -->
+    <div class="timer-card">
+      <div id="sessionBadge" class="session-badge idle">Ready to Focus</div>
+      <div id="timeDisplay" class="time-display">25:00</div>
+      <div class="timer-controls">
+        <button id="startWorkBtn" class="primary-btn">Start Focus</button>
+        <button id="startBreakBtn" class="secondary-btn">Take Break</button>
+        <button id="stopBtn" class="danger-btn hidden">Stop</button>
+      </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="stats-grid">
+      <div class="stat-box">
+        <span class="stat-value" id="statBlocks">0</span>
+        <span class="stat-label">Blocked Today</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-value" id="statFocus">0m</span>
+        <span class="stat-label">Focus Time</span>
+      </div>
+      <div class="stat-box">
+        <span class="stat-value" id="statStreak">1d</span>
+        <span class="stat-label">Daily Streak</span>
+      </div>
+    </div>
+
+    <!-- Footer toggles -->
+    <footer class="footer">
+      <label class="toggle-row">
+        <span>Sound Effects</span>
+        <input type="checkbox" id="soundToggle" checked>
+      </label>
+      <div class="privacy-note">🔒 Privacy: Only URLs & titles are sent</div>
+    </footer>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
