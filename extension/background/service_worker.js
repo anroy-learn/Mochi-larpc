@@ -72,6 +72,7 @@ chrome.runtime.onInstalled.addListener(async () => {
 });
 
 chrome.runtime.onStartup.addListener(() => {
+  chrome.storage.local.set({ pomodoroMode: "idle", pomodoroEndTime: 0 });
   initWebSocket();
 });
 

@@ -51,13 +51,21 @@ class ConfigManager:
                 json.dump(self.config, f, indent=2)
             
             # Sync token directly into extension/config.json for automatic zero-config extension auth
-            ext_config = Path(__file__).resolve().parent.parent / "extension" / "config.json"
-            if ext_config.parent.exists():
-                with open(ext_config, "w", encoding="utf-8") as f:
-                    json.dump({
-                        "authToken": self.config.get("auth_token", ""),
-                        "wsPort": self.config.get("port", 8765)
-                    }, f, indent=2)
+            ext_targets = [
+                Path(__file__).resolve().parent.parent / "extension" / "config.json",
+                Path.home() / "Downloads" / "tab-pet-extension" / "config.json",
+            ]
+            cfg_data = {
+                "authToken": self.config.get("auth_token", ""),
+                "wsPort": self.config.get("port", 8765)
+            }
+            for ext_config in ext_targets:
+                if ext_config.parent.exists():
+                    try:
+                        with open(ext_config, "w", encoding="utf-8") as f:
+                            json.dump(cfg_data, f, indent=2)
+                    except Exception:
+                        pass
         except Exception as e:
             print(f"[Config] Error saving config: {e}")
 

@@ -296,8 +296,7 @@ class ProceduralPet:
         self.state = PetState.HOP
         self.state_time = 0.0
         self.hop_start_x = self.x
-        self.hop_target_x = max(35.0, target_x)
-        self.facing = 1 if self.hop_target_x > self.hop_start_x else -1
+        self.hop_target_x = self.x  # hops in place
         self.hop_progress = 0.0
 
     def _update_hop(self, dt: float) -> None:
@@ -326,27 +325,8 @@ class ProceduralPet:
             self.state_duration = random.uniform(1.5, 3.5)
 
     def _update_walk(self, dt: float) -> None:
-        dx = self.target_x - self.x
-        dist = abs(dx)
-
-        if dist < 4.0:
-            self.x = self.target_x
-            self.scale_x = 1.15
-            self.scale_y = 0.85
-            if getattr(self, "_pounce_on_arrive", False):
-                self._pounce_on_arrive = False
-                self.trigger_pounce()
-            else:
-                self.state = PetState.SIT
-                self.state_time = 0.0
-                self.state_duration = 2.0
-                if self.on_reach_target:
-                    self.on_reach_target()
-            return
-
-        step = math.copysign(min(dist, self.walk_speed * dt), dx)
-        self.x += step
-
+        # Keep centered in compact window while window translates across screen
+        self.x = self.target_x
         walk_freq = 14.0
         bounce = abs(math.sin(self.state_time * walk_freq))
         self.y = self.target_y - (bounce * 8.0)

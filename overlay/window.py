@@ -1,71 +1,15 @@
 import sys
 import time
-import ctypes
-import ctypes.util
 from collections import deque
 from typing import Optional, Tuple, Deque
 
-from PySide6.QtCore import Qt, QTimer, QPoint, QRect, Slot
-from PySide6.QtGui import QPainter, QGuiApplication, QColor
+from PySide6.QtCore import Qt, QTimer, QPoint, Slot
+from PySide6.QtGui import QPainter, QMouseEvent
 from PySide6.QtWidgets import QWidget
 
 from overlay.pet import ProceduralPet, PetState
 from overlay.config import ConfigManager
 from overlay.server import ServerBridge, TabPetServer
-
-
-def configure_macos_window(win_id: int) -> None:
-    """
-    Configures macOS Cocoa native window flags:
-    - setHidesOnDeactivate:NO (prevents Cocoa from hiding the overlay when Chrome is active)
-    - setCollectionBehavior (makes pet visible across all Spaces and Fullscreen apps)
-    - setLevel (ensures pet floats permanently above Chrome)
-    - setIgnoresMouseEvents:YES (ensures all mouse clicks pass straight to Chrome tabs)
-    """
-    if sys.platform != "darwin":
-        return
-
-    try:
-        objc = ctypes.cdll.LoadLibrary(ctypes.util.find_library("objc"))
-        objc.sel_registerName.restype = ctypes.c_void_p
-        objc.sel_registerName.argtypes = [ctypes.c_char_p]
-
-        sel_window = objc.sel_registerName(b"window")
-        sel_set_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
-        sel_set_collection = objc.sel_registerName(b"setCollectionBehavior:")
-        sel_set_level = objc.sel_registerName(b"setLevel:")
-        sel_set_ignores = objc.sel_registerName(b"setIgnoresMouseEvents:")
-
-        # Send [view window] to get the NSWindow
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
-        objc.objc_msgSend.restype = ctypes.c_void_p
-        ns_window = objc.objc_msgSend(win_id, sel_window)
-
-        if not ns_window:
-            ns_window = win_id
-
-        # 1. Do NOT hide when deactivating
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
-        objc.objc_msgSend.restype = None
-        objc.objc_msgSend(ns_window, sel_set_hides, False)
-
-        # 2. CanJoinAllSpaces (1) | FullScreenAuxiliary (256)
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
-        objc.objc_msgSend.restype = None
-        objc.objc_msgSend(ns_window, sel_set_collection, 1 | 256)
-
-        # 3. Status Window Level (25) - stays on top of Chrome at all times
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
-        objc.objc_msgSend.restype = None
-        objc.objc_msgSend(ns_window, sel_set_level, 25)
-
-        # 4. Pass mouse clicks through to Chrome tabs beneath the pet
-        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
-        objc.objc_msgSend.restype = None
-        objc.objc_msgSend(ns_window, sel_set_ignores, True)
-
-    except Exception as e:
-        print(f"[Overlay] Native macOS window setup warning: {e}")
 
 
 class BlockedTask:
@@ -78,11 +22,16 @@ class BlockedTask:
 
 class PetOverlayWindow(QWidget):
     """
-    Transparent, click-through, always-on-top overlay window that sits
-    directly over the Chrome tab bar.
+    Compact, floating Desktop Pet (76x76 px).
+    Features:
+    - Physically lives on the active Chrome tab as an independent desktop character.
+    - Moves smoothly across the screen along the tab bar when switching tabs or closing blocked tabs.
+    - NEVER covers the rest of the tab bar (only 76px wide right where it sits).
+    - Fully draggable with the mouse anywhere on screen.
+    - Petting interaction: clicking the pet squashes it happily and emits hearts.
     """
 
-    STRIP_HEIGHT = 60  # Height of the overlay strip over Chrome tabs
+    PET_SIZE = 76  # Compact window dimension
 
     def __init__(
         self,
@@ -95,19 +44,31 @@ class PetOverlayWindow(QWidget):
         self.bridge = bridge
         self.server = server
 
-        # Overlay geometry state
-        self.chrome_bounds: Optional[Tuple[int, int, int, int]] = None
+        # Chrome window reference
+        self.chrome_left: int = 0
+        self.chrome_top: int = 22
+        self.chrome_width: int = 1512
         self.tab_count: int = 1
         self.active_tab_index: int = 0
+
+        # Physical screen position & walking kinematics
+        self.screen_x: float = 200.0
+        self.screen_y: float = float(self.chrome_top)
+        self.target_screen_x: float = 200.0
+        self.target_screen_y: float = float(self.chrome_top)
+        self.walk_speed: float = 480.0  # Pixels per second
+
+        # Dragging state
+        self.is_dragging: bool = False
+        self.drag_offset = QPoint()
 
         # Blocked tabs queue
         self.blocked_queue: Deque[BlockedTask] = deque()
         self.current_blocked_task: Optional[BlockedTask] = None
 
-        # Setup pet and position
-        tab_y_offset = float(self.config.get("tab_offset_y", 20))
-        self.pet_ground_y = float(self.STRIP_HEIGHT - tab_y_offset)
-        self.pet = ProceduralPet(x=160.0, y=self.pet_ground_y)
+        # Procedural pet renderer (centered in the 76x76 canvas)
+        # Ground at y = 62
+        self.pet = ProceduralPet(x=self.PET_SIZE / 2.0, y=62.0)
         self.pet.sound_enabled = bool(self.config.get("sound_enabled", True))
 
         self._init_window()
@@ -115,39 +76,27 @@ class PetOverlayWindow(QWidget):
         self._connect_signals()
 
     def _init_window(self) -> None:
-        """Sets window flags for transparent, always-on-top overlay."""
+        """Sets window flags for floating, transparent compact pet."""
         flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
-            | Qt.WindowType.WindowTransparentForInput
         )
         self.setWindowFlags(flags)
 
-        # Translucent background
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setStyleSheet("background: transparent;")
+        self.setFixedSize(self.PET_SIZE, self.PET_SIZE)
 
-        # Default size and position across top screen
-        screen = QGuiApplication.primaryScreen()
-        if screen:
-            screen_geo = screen.geometry()
-            default_w = min(1512, screen_geo.width())
-            default_x = 0
-            default_y = 30  # Sits right on Chrome tab bar below menu bar
-            self.setGeometry(default_x, default_y, default_w, self.STRIP_HEIGHT)
-        else:
-            self.setGeometry(0, 30, 1200, self.STRIP_HEIGHT)
+        # Place initial position above first tab
+        initial_x = self.config.calculate_tab_x(self.chrome_width, 0, 1) - (self.PET_SIZE / 2.0)
+        self.screen_x = max(10.0, initial_x)
+        self.target_screen_x = self.screen_x
+        self.move(int(self.screen_x), int(self.screen_y))
 
-        self.setWindowTitle("TabPetOverlay")
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        # Apply macOS Cocoa native window configuration
-        configure_macos_window(int(self.winId()))
+        self.setWindowTitle("TabPet")
 
     def _init_timers(self) -> None:
-        """60 FPS render and animation update loop."""
+        """60 FPS render and kinematic movement loop."""
         self.last_update_time = time.time()
         self.anim_timer = QTimer(self)
         self.anim_timer.timeout.connect(self._on_tick)
@@ -167,44 +116,94 @@ class PetOverlayWindow(QWidget):
         dt = min(0.05, now - self.last_update_time)
         self.last_update_time = now
 
-        # Update pet physics and animations
+        # Update walking movement across screen towards target tab
+        if not self.is_dragging:
+            dx = self.target_screen_x - self.screen_x
+            dist = abs(dx)
+
+            if dist > 3.0:
+                # Walk across tab bar towards target
+                direction = 1 if dx > 0 else -1
+                step = min(dist, self.walk_speed * dt)
+                self.screen_x += direction * step
+                self.pet.facing = direction
+                self.pet.state = PetState.WALK
+                self.move(int(self.screen_x), int(self.screen_y))
+            else:
+                self.screen_x = self.target_screen_x
+                self.move(int(self.screen_x), int(self.screen_y))
+
+                # Check if we arrived at a blocked tab
+                if self.current_blocked_task and self.pet.state == PetState.WALK:
+                    self.pet.trigger_pounce()
+                elif self.pet.state == PetState.WALK:
+                    self.pet.state = PetState.SIT
+                    self.pet.state_time = 0.0
+
+        # Update pet physics and procedural animations
         self.pet.update(dt)
 
         # Repaint canvas
         self.update()
 
     # -------------------------------------------------------------
-    # Slots & Signal Handlers
+    # Mouse Interactions: Petting and Dragging
+    # -------------------------------------------------------------
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.pet.pet_touch()
+            self.is_dragging = True
+            self.drag_offset = event.globalPosition().toPoint() - self.pos()
+            self.update()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self.is_dragging:
+            new_pos = event.globalPosition().toPoint() - self.drag_offset
+            self.move(new_pos)
+            self.screen_x = float(new_pos.x())
+            self.screen_y = float(new_pos.y())
+            self.target_screen_x = self.screen_x
+            self.target_screen_y = self.screen_y
+            self.pet.start_drag()
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self.is_dragging:
+            self.is_dragging = False
+            self.pet.end_drag(62.0)
+            self.update()
+        super().mouseReleaseEvent(event)
+
+    # -------------------------------------------------------------
+    # Signal Handlers & Live Chrome Sync
     # -------------------------------------------------------------
     @Slot(int, int, int, int, int)
     def on_bounds_received(self, left: int, top: int, width: int, height: int, tab_count: int) -> None:
-        """Follows Chrome window bounds live."""
-        # Sanity check: clamp to visible screen area so it never jumps offscreen
-        left = max(0, left)
-        # Position overlay directly over the Chrome tab strip
-        top = 22
-
-        width = max(300, min(1512, width))
-
-        self.chrome_bounds = (left, top, width, height)
+        """Updated Chrome window position and dimensions."""
+        self.chrome_left = max(0, left)
+        # Tab bar is directly under the menu bar on macOS (y ≈ 20-25)
+        self.chrome_top = 22
+        self.chrome_width = max(300, width)
         self.tab_count = max(1, tab_count)
+        self.screen_y = float(self.chrome_top)
+        self.target_screen_y = self.screen_y
 
-        self.setGeometry(left, top, width, self.STRIP_HEIGHT)
-        self.raise_()
-        self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
+        if not self.is_dragging:
+            self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
 
     @Slot(int, int)
     def on_tab_activated(self, tab_index: int, tab_count: int) -> None:
-        """Hops to the active tab index if not currently busy closing a blocked tab."""
-        if self.current_blocked_task or len(self.blocked_queue) > 0:
+        """Active tab changed: pet walks over to new tab."""
+        if self.is_dragging or self.current_blocked_task or len(self.blocked_queue) > 0:
             return
-
         self.move_pet_to_tab(tab_index, tab_count=tab_count, pounce=False)
 
     @Slot(int, int, int, str, str)
     def on_blocked_tab_opened(self, tab_id: int, tab_index: int, tab_count: int, url: str, title: str) -> None:
-        """Queues a blocked tab to be closed."""
-        print(f"[Overlay] 🚨 Blocked tab detected: id={tab_id}, index={tab_index}, url={url}")
+        """Queue blocked tab: pet marches over to stomp it shut."""
+        print(f"[DesktopPet] 🚨 Blocked tab detected: id={tab_id}, index={tab_index}, url={url}")
         task = BlockedTask(tab_id, tab_index, tab_count, url)
         self.blocked_queue.append(task)
 
@@ -219,43 +218,36 @@ class PetOverlayWindow(QWidget):
         task = self.blocked_queue.popleft()
         self.current_blocked_task = task
 
-        target_x = self.config.calculate_tab_x(self.width(), task.tab_index, task.tab_count)
-        target_x = max(25.0, min(float(self.width() - 35), target_x))
-
-        self.pet.set_target(target_x, pounce_on_arrive=True)
+        # Set target to blocked tab's horizontal position
+        tab_center_x = self.config.calculate_tab_x(self.chrome_width, task.tab_index, task.tab_count)
+        self.target_screen_x = self.chrome_left + tab_center_x - (self.PET_SIZE / 2.0)
 
         def on_pounce_finished():
-            print(f"[Overlay] 💥 Pounce complete for tab {task.tab_id}! Requesting close.")
+            print(f"[DesktopPet] 💥 Stomped tab {task.tab_id}! Closing now.")
             if self.server:
                 self.server.notify_tab_closed(task.tab_id)
-
-            QTimer.singleShot(250, self._process_next_blocked_tab)
+            QTimer.singleShot(300, self._process_next_blocked_tab)
 
         self.pet.on_pounce_complete = on_pounce_finished
 
     @Slot()
     def on_calibration_updated(self) -> None:
-        """Updates pet ground level, sound settings, and active position when calibration changes."""
-        tab_y_offset = float(self.config.get("tab_offset_y", 14))
-        self.pet_ground_y = float(self.STRIP_HEIGHT - tab_y_offset)
-        self.pet.y = self.pet_ground_y
-        self.pet.target_y = self.pet_ground_y
+        """Live calibration change."""
         self.pet.sound_enabled = bool(self.config.get("sound_enabled", True))
+        if not self.is_dragging:
+            self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
 
     def move_pet_to_tab(self, tab_index: int, tab_count: Optional[int] = None, pounce: bool = False) -> None:
-        """Commands pet to navigate to a specific tab index."""
+        """Sets the target tab for the pet to walk to."""
         if tab_count is not None:
             self.tab_count = max(1, tab_count)
         self.active_tab_index = tab_index
 
-        window_width = self.width()
-        target_x = self.config.calculate_tab_x(window_width, tab_index, self.tab_count)
-        target_x = max(25.0, min(float(window_width - 35), target_x))
-
-        self.pet.set_target(target_x, pounce_on_arrive=pounce)
+        tab_center_x = self.config.calculate_tab_x(self.chrome_width, tab_index, self.tab_count)
+        self.target_screen_x = self.chrome_left + tab_center_x - (self.PET_SIZE / 2.0)
 
     def paintEvent(self, event) -> None:
-        """Paints the procedural pet over the transparent canvas."""
+        """Paints the procedural pet inside its 76x76 transparent canvas."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.pet.draw(painter)
