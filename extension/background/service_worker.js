@@ -199,9 +199,10 @@ async function sendCurrentWindowBounds() {
     const activeTab = tabs.find((t) => t.active);
     const activeIndex = activeTab ? activeTab.index : 0;
 
+    const sendLeft = Math.max(0, win.left || 0);
     sendWs({
       type: "window_bounds",
-      left: win.left,
+      left: sendLeft,
       top: win.top,
       width: win.width,
       height: win.height,

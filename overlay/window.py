@@ -179,20 +179,19 @@ class PetOverlayWindow(QWidget):
     @Slot(int, int, int, int, int)
     def on_bounds_received(self, left: int, top: int, width: int, height: int, tab_count: int) -> None:
         """Follows Chrome window bounds live."""
-        # Sanity check: prevent moving offscreen if Chrome sends minimized coordinates
-        if left < -2000 or top < -2000 or width < 200:
-            return
-
-        # On macOS, Chrome's tab strip sits right below the menu bar (y ≈ 28-33)
+        # Sanity check: clamp to visible screen area so it never jumps offscreen
+        left = max(0, left)
         if top >= 80:
             top = 30
         else:
-            top = max(0, top)
+            top = max(28, top)
+
+        width = max(300, min(1512, width))
 
         self.chrome_bounds = (left, top, width, height)
         self.tab_count = max(1, tab_count)
 
-        self.setGeometry(left, top, max(300, width), self.STRIP_HEIGHT)
+        self.setGeometry(left, top, width, self.STRIP_HEIGHT)
         self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
 
     @Slot(int, int)
