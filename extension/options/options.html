@@ -12,19 +12,28 @@
         <span class="logo">🐾</span>
         <div>
           <h1>Tab Pet Settings</h1>
-          <p class="subtitle">Configure your focus guardian and blocked websites</p>
+          <p class="subtitle">Configure your focus guardian, AI judge, and website lists</p>
         </div>
       </div>
     </header>
 
     <div class="content-grid">
-      <!-- Blocklist Card -->
+      <!-- Always-Blocked Card -->
       <section class="card">
-        <h2>🚫 Focus Blocklist</h2>
+        <h2>🚫 Always-Blocked Domains</h2>
         <p class="card-desc">
-          Paste the domains or URLs you want Tab Pet to close during Focus sessions (one per line).
+          Domains Tab Pet closes immediately without consulting the AI (one per line).
         </p>
-        <textarea id="blocklistInput" rows="9" placeholder="youtube.com&#10;reddit.com&#10;twitter.com&#10;x.com&#10;instagram.com"></textarea>
+        <textarea id="blocklistInput" rows="7" placeholder="twitter.com&#10;x.com&#10;instagram.com&#10;facebook.com&#10;tiktok.com&#10;netflix.com&#10;twitch.tv"></textarea>
+      </section>
+
+      <!-- Smart Judge Mixed Domains Card -->
+      <section class="card">
+        <h2>⚖️ Smart Judge Mixed Domains</h2>
+        <p class="card-desc">
+          Evaluated by Gemini against your Focus Goal (e.g. coding tutorials allowed, cat videos blocked).
+        </p>
+        <textarea id="mixedlistInput" rows="7" placeholder="youtube.com&#10;reddit.com"></textarea>
       </section>
 
       <!-- Pomodoro Card -->
@@ -41,7 +50,7 @@
 
         <h2 style="margin-top: 24px;">🔑 Desktop Overlay Auth Token</h2>
         <p class="card-desc">
-          Matched automatically from your local Python server. You can also paste it manually from your terminal.
+          Matched automatically from your local Python server. You can also paste it manually.
         </p>
         <div class="field-row">
           <input type="password" id="authTokenInput" placeholder="Enter auth token from terminal">

@@ -1,7 +1,7 @@
 /**
  * Tab Pet - Background Service Worker (Manifest V3)
  * Handles WebSocket connection with PySide6 desktop overlay,
- * Pomodoro timers via chrome.alarms, and blocklist enforcement.
+ * Pomodoro timers via chrome.alarms, Smart Judge, and Plea Bargaining.
  */
 
 let ws = null;
@@ -12,6 +12,9 @@ const MAX_RECONNECT_DELAY = 10000;
 // Track tabs currently being closed by the pet to avoid duplicate messages
 const pendingBlockedTabs = new Set();
 
+// Temporary passes granted through plea bargaining (tabId -> expirationTimestamp)
+const temporaryPasses = new Map();
+
 // Default storage state
 const DEFAULT_STATE = {
   authToken: "",
@@ -21,9 +24,13 @@ const DEFAULT_STATE = {
   workDuration: 25,     // minutes
   breakDuration: 5,     // minutes
   soundEnabled: true,
-  blockedDomains: [
+  focusGoal: "",
+  localOnly: false,
+  mixedDomains: [
     "youtube.com",
-    "reddit.com",
+    "reddit.com"
+  ],
+  blockedDomains: [
     "twitter.com",
     "x.com",
     "instagram.com",
@@ -76,7 +83,6 @@ chrome.runtime.onStartup.addListener(() => {
   initWebSocket();
 });
 
-// Immediate execution when service worker loads/wakes up
 initWebSocket();
 
 // -------------------------------------------------------------
@@ -127,7 +133,6 @@ async function initWebSocket() {
       console.log("[TabPet] Connected to Python Desktop Overlay!");
       reconnectDelay = 1000;
       if (reconnectTimer) clearTimeout(reconnectTimer);
-      // Immediately sync current window coordinates
       sendCurrentWindowBounds();
     };
 
@@ -171,10 +176,9 @@ function sendWs(payload) {
 
 function handleServerMessage(msg) {
   if (msg.type === "tab_closed") {
-    // Pet has stomped and closed the tab!
     const tabId = msg.tab_id;
     if (tabId) {
-      console.log(`[TabPet] Closing tab ${tabId} per pet command.`);
+      console.log(`[TabPet] Closing tab ${tabId} per pet command. Roast: ${msg.roast || ""}`);
       chrome.tabs.remove(tabId).catch(() => {});
       pendingBlockedTabs.delete(tabId);
     }
@@ -213,18 +217,11 @@ async function sendCurrentWindowBounds() {
   } catch (_) {}
 }
 
-// Window bounds changes (moving or resizing Chrome)
-chrome.windows.onBoundsChanged.addListener(() => {
-  sendCurrentWindowBounds();
-});
-
+chrome.windows.onBoundsChanged.addListener(() => sendCurrentWindowBounds());
 chrome.windows.onFocusChanged.addListener((windowId) => {
-  if (windowId !== chrome.windows.WINDOW_ID_NONE) {
-    sendCurrentWindowBounds();
-  }
+  if (windowId !== chrome.windows.WINDOW_ID_NONE) sendCurrentWindowBounds();
 });
 
-// Tab navigation / activation (pet hops to tab)
 chrome.tabs.onActivated.addListener(async (activeInfo) => {
   try {
     const tab = await chrome.tabs.get(activeInfo.tabId);
@@ -237,17 +234,15 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   } catch (_) {}
 });
 
-chrome.tabs.onCreated.addListener(() => {
-  sendCurrentWindowBounds();
-});
-
+chrome.tabs.onCreated.addListener(() => sendCurrentWindowBounds());
 chrome.tabs.onRemoved.addListener((tabId) => {
   pendingBlockedTabs.delete(tabId);
+  temporaryPasses.delete(tabId);
   sendCurrentWindowBounds();
 });
 
 // -------------------------------------------------------------
-// 4. Pomodoro Focus Session Management (chrome.alarms)
+// 4. Pomodoro Focus Session Management
 // -------------------------------------------------------------
 const ALARM_NAME = "tab_pet_pomodoro";
 
@@ -266,7 +261,6 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
   }
 
   if (mode === "work") {
-    // Work finished! Add stats and switch to break
     stats.focusMinutesToday += Number(data.workDuration || 25);
     const breakMinutes = Number(data.breakDuration || 5);
     const nextEndTime = Date.now() + breakMinutes * 60 * 1000;
@@ -276,29 +270,25 @@ chrome.alarms.onAlarm.addListener(async (alarm) => {
       pomodoroEndTime: nextEndTime,
       stats
     });
-
     chrome.alarms.create(ALARM_NAME, { when: nextEndTime });
-    console.log("[TabPet] Pomodoro work session completed! Break time.");
   } else if (mode === "break") {
-    // Break finished! Idle
     await chrome.storage.local.set({
       pomodoroMode: "idle",
       pomodoroEndTime: 0
     });
-    console.log("[TabPet] Pomodoro break completed!");
   }
 });
 
 // -------------------------------------------------------------
-// 5. Blocklist Enforcement & Tab Walking Stomp
+// 5. Blocklist, Smart Judge & Plea Bargain
 // -------------------------------------------------------------
-function isBlockedUrl(rawUrl, blockedDomains) {
+function isDomainMatch(rawUrl, domainList) {
   if (!rawUrl || !rawUrl.startsWith("http")) return false;
   try {
     const urlObj = new URL(rawUrl);
     const hostname = urlObj.hostname.toLowerCase();
-    return blockedDomains.some((domain) => {
-      const clean = domain.trim().toLowerCase();
+    return domainList.some((d) => {
+      const clean = d.trim().toLowerCase();
       if (!clean) return false;
       return hostname === clean || hostname.endsWith("." + clean);
     });
@@ -307,7 +297,7 @@ function isBlockedUrl(rawUrl, blockedDomains) {
   }
 }
 
-// Clean sanitized URL (privacy requirement: no query parameters or hashes)
+// Sanitize URL to protocol + domain + pathname only (privacy: NO query parameters or tokens)
 function sanitizeUrl(rawUrl) {
   try {
     const urlObj = new URL(rawUrl);
@@ -321,22 +311,37 @@ async function handlePotentialBlockedTab(tab) {
   if (!tab || !tab.id || !tab.url) return;
   if (pendingBlockedTabs.has(tab.id)) return;
 
-  const { pomodoroMode, blockedDomains, stats } = await chrome.storage.local.get([
+  // Check temporary grace pass
+  if (temporaryPasses.has(tab.id)) {
+    const expiresAt = temporaryPasses.get(tab.id);
+    if (Date.now() < expiresAt) return; // Grace period active
+    temporaryPasses.delete(tab.id);
+  }
+
+  const data = await chrome.storage.local.get([
     "pomodoroMode",
     "blockedDomains",
-    "stats"
+    "mixedDomains",
+    "focusGoal",
+    "stats",
+    "wsPort",
+    "localOnly"
   ]);
 
-  // Only block during active 'work' sessions
-  if (pomodoroMode !== "work") return;
+  if (data.pomodoroMode !== "work") return;
 
-  const domains = blockedDomains || DEFAULT_STATE.blockedDomains;
-  if (!isBlockedUrl(tab.url, domains)) return;
+  const alwaysBlocked = data.blockedDomains || DEFAULT_STATE.blockedDomains;
+  const mixed = data.mixedDomains || DEFAULT_STATE.mixedDomains;
+  const isAlways = isDomainMatch(tab.url, alwaysBlocked);
+  const isMixed = isDomainMatch(tab.url, mixed);
 
-  // Mark tab as pending blocked close
-  pendingBlockedTabs.add(tab.id);
+  if (!isAlways && !isMixed) return;
 
-  // 1. Immediately blank/cover the tab with warning UI
+  const port = data.wsPort || 8765;
+  const goal = data.focusGoal || "";
+  const cleanUrl = sanitizeUrl(tab.url);
+
+  // Inject cover overlay into tab
   try {
     await chrome.scripting.insertCSS({
       target: { tabId: tab.id },
@@ -347,58 +352,170 @@ async function handlePotentialBlockedTab(tab) {
       files: ["content/cover.js"]
     });
   } catch (err) {
-    console.warn("[TabPet] Could not inject cover overlay:", err);
+    console.warn("[TabPet] Could not inject cover:", err);
   }
 
-  // 2. Increment stats
-  const currentStats = stats || DEFAULT_STATE.stats;
+  // 1. SMART JUDGE for mixed domains (YouTube, Reddit, etc.)
+  if (isMixed && !data.localOnly) {
+    try {
+      chrome.tabs.sendMessage(tab.id, { action: "set_thinking", goal }).catch(() => {});
+
+      // Call local AI Judge endpoint with 2.0s hard timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+      const resp = await fetch(`http://127.0.0.1:${port}/judge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          url: cleanUrl,
+          title: tab.title || "",
+          goal
+        }),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        const judgeData = await resp.json();
+        if (judgeData.verdict === "allow") {
+          console.log(`[TabPet] AI Judge allowed page: ${cleanUrl} (${judgeData.reason})`);
+          chrome.tabs.sendMessage(tab.id, {
+            action: "allow_tab",
+            reason: judgeData.reason
+          }).catch(() => {});
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn("[TabPet] AI Judge call failed/timed out. Falling back to block:", e);
+    }
+  }
+
+  // 2. ALWAYS-BLOCK or AI Verdict = Block
+  pendingBlockedTabs.add(tab.id);
+
+  // Tell cover to show blocked state with Plea Bargain form
+  chrome.tabs.sendMessage(tab.id, {
+    action: "set_blocked",
+    url: cleanUrl,
+    title: tab.title || "",
+    goal
+  }).catch(() => {});
+
+  // Increment stats
+  const currentStats = data.stats || DEFAULT_STATE.stats;
   currentStats.blocksToday = (currentStats.blocksToday || 0) + 1;
   await chrome.storage.local.set({ stats: currentStats });
 
-  // 3. Obtain window information to calculate tab index
   let tabCount = 1;
   try {
     const win = await chrome.windows.get(tab.windowId, { populate: true });
     tabCount = (win.tabs || []).length;
   } catch (_) {}
 
-  // 4. Send command to Desktop Pet overlay
-  const cleanUrl = sanitizeUrl(tab.url);
+  // Send stomping command to Desktop Pet overlay
   sendWs({
     type: "blocked_tab_opened",
     tab_id: tab.id,
     tab_index: tab.index,
     tab_count: tabCount,
     url: cleanUrl,
-    title: tab.title || ""
+    title: tab.title || "",
+    blocks_today: currentStats.blocksToday,
+    streak_days: currentStats.streakDays,
+    goal
   });
 
-  // 5. Fail-safe timeout: close tab after 4.5 seconds if WS or overlay fails
+  // Fail-safe close after 7 seconds if pet or user doesn't plea
   setTimeout(() => {
     if (pendingBlockedTabs.has(tab.id)) {
       chrome.tabs.remove(tab.id).catch(() => {});
       pendingBlockedTabs.delete(tab.id);
     }
-  }, 4500);
+  }, 7000);
 }
 
-// Listen to tab updates (page load / navigation)
+// -------------------------------------------------------------
+// 6. Content Script & Popup Message Dispatcher
+// -------------------------------------------------------------
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "submit_plea") {
+    // Plea bargain from cover screen
+    (async () => {
+      const { wsPort, focusGoal } = await chrome.storage.local.get(["wsPort", "focusGoal"]);
+      const port = wsPort || 8765;
+      const tabId = sender.tab ? sender.tab.id : message.tabId;
+
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/plea`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tab_id: tabId,
+            url: sanitizeUrl(message.url),
+            title: message.title || "",
+            goal: focusGoal || "",
+            plea: message.plea
+          })
+        });
+
+        if (resp.ok) {
+          const pleaData = await resp.json();
+          if (pleaData.grant_minutes > 0) {
+            // Grant temporary grace pass
+            temporaryPasses.set(tabId, Date.now() + (pleaData.grant_minutes * 60 * 1000));
+            pendingBlockedTabs.delete(tabId);
+          }
+          sendResponse({
+            granted: pleaData.grant_minutes > 0,
+            minutes: pleaData.grant_minutes,
+            reason: pleaData.reason,
+            trust_score: pleaData.trust_score,
+            offline: pleaData.offline
+          });
+          return;
+        }
+      } catch (e) {
+        console.warn("[TabPet] Plea API error:", e);
+      }
+      sendResponse({ granted: false, minutes: 0, reason: "Plea evaluation failed.", trust_score: 50, offline: true });
+    })();
+    return true; // Keep message channel open for async response
+  }
+
+  if (message.action === "set_goal") {
+    (async () => {
+      await chrome.storage.local.set({ focusGoal: message.goal });
+      const { wsPort } = await chrome.storage.local.get(["wsPort"]);
+      const port = wsPort || 8765;
+      fetch(`http://127.0.0.1:${port}/goal`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ goal: message.goal })
+      }).catch(() => {});
+      sendWs({ type: "set_goal", goal: message.goal });
+      sendResponse({ status: "ok" });
+    })();
+    return true;
+  }
+});
+
+// Tab navigation listeners
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (changeInfo.status === "loading" && tab.url) {
     handlePotentialBlockedTab(tab);
   }
 });
 
-// Listen to webNavigation before navigation starts
 chrome.webNavigation.onBeforeNavigate.addListener(async (details) => {
-  if (details.frameId !== 0) return; // Top-level frame only
+  if (details.frameId !== 0) return;
   try {
     const tab = await chrome.tabs.get(details.tabId);
     handlePotentialBlockedTab({ ...tab, url: details.url });
   } catch (_) {}
 });
 
-// Periodic ping / connection watchdog
 setInterval(() => {
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     initWebSocket();

@@ -13,11 +13,20 @@
         <span class="pet-icon">🐾</span>
         <div>
           <h1 class="brand-title">Tab Pet</h1>
-          <span id="connectionStatus" class="status-badge disconnected">Connecting...</span>
+          <div class="status-pills">
+            <span id="connectionStatus" class="status-badge disconnected">Connecting...</span>
+            <span id="aiStatus" class="status-badge ai-badge hidden">Offline Mode</span>
+          </div>
         </div>
       </div>
       <a href="../options/options.html" target="_blank" class="gear-btn" title="Settings">⚙️</a>
     </header>
+
+    <!-- Focus Goal Field -->
+    <div class="goal-card">
+      <label for="focusGoalInput" class="goal-label">🎯 What are you working on?</label>
+      <input type="text" id="focusGoalInput" class="goal-input" placeholder="e.g. Study algorithms, research paper">
+    </div>
 
     <!-- Timer Card -->
     <div class="timer-card">
@@ -46,13 +55,35 @@
       </div>
     </div>
 
+    <!-- Pet's Notes Card -->
+    <div class="notes-card">
+      <div class="notes-header">
+        <span class="notes-title">📝 Pet's Notes</span>
+        <span id="trustBadge" class="trust-badge">Trust: 50%</span>
+      </div>
+      <div class="notes-summary">
+        <span>Saves: <strong id="notesSaves">0</strong></span>
+        <span>•</span>
+        <span>Blocks: <strong id="notesBlocks">0</strong></span>
+        <span>•</span>
+        <span>Pleas: <strong id="notesPleas">0</strong></span>
+      </div>
+      <div id="recentEventsList" class="recent-events-list">
+        <div class="event-empty">No recent events yet. Stay focused!</div>
+      </div>
+    </div>
+
     <!-- Footer toggles -->
     <footer class="footer">
+      <label class="toggle-row">
+        <span>Local Only (Disable AI)</span>
+        <input type="checkbox" id="localOnlyToggle">
+      </label>
       <label class="toggle-row">
         <span>Sound Effects</span>
         <input type="checkbox" id="soundToggle" checked>
       </label>
-      <div class="privacy-note">🔒 Privacy: Only URLs & titles are sent</div>
+      <div class="privacy-note">🔒 Privacy: Only sanitized URLs & titles are sent</div>
     </footer>
   </div>
 

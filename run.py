@@ -5,6 +5,8 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QTimer
 
 from overlay.config import ConfigManager
+from overlay.memory import MemoryStore
+from overlay.ai import GeminiPetAI
 from overlay.server import ServerBridge, TabPetServer
 from overlay.window import PetOverlayWindow
 from overlay.calibration import CalibrationDialog
@@ -34,6 +36,10 @@ def main():
     print(f"📏 Calibrated offsets: X={config.get('tab_offset_x')}px, Y={config.get('tab_offset_y')}px, MaxTabW={config.get('max_tab_width')}px")
     print("=" * 65)
 
+    # Memory Store and AI Controller
+    memory = MemoryStore()
+    ai = GeminiPetAI(memory)
+
     # Qt Signal Bridge
     bridge = ServerBridge()
 
@@ -42,11 +48,11 @@ def main():
     tracker.start()
 
     # FastAPI + WebSocket Server
-    server = TabPetServer(config, bridge)
+    server = TabPetServer(config, bridge, ai=ai, memory=memory)
     server.start_background()
 
     # Overlay Window
-    window = PetOverlayWindow(config, bridge=bridge, server=server)
+    window = PetOverlayWindow(config, bridge=bridge, server=server, ai=ai, memory=memory)
     window.show()
     window.raise_()
     window.activateWindow()

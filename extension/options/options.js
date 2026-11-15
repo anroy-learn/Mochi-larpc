@@ -1,8 +1,9 @@
 /**
- * Tab Pet Options Controller
+ * Tab Pet Options Controller with Mixed Domains
  */
 
 const blocklistInput = document.getElementById("blocklistInput");
+const mixedlistInput = document.getElementById("mixedlistInput");
 const workDuration = document.getElementById("workDuration");
 const breakDuration = document.getElementById("breakDuration");
 const authTokenInput = document.getElementById("authTokenInput");
@@ -14,6 +15,7 @@ const saveNotice = document.getElementById("saveNotice");
 document.addEventListener("DOMContentLoaded", async () => {
   const data = await chrome.storage.local.get([
     "blockedDomains",
+    "mixedDomains",
     "workDuration",
     "breakDuration",
     "authToken"
@@ -21,6 +23,22 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   if (data.blockedDomains && Array.isArray(data.blockedDomains)) {
     blocklistInput.value = data.blockedDomains.join("\n");
+  } else {
+    blocklistInput.value = [
+      "twitter.com",
+      "x.com",
+      "instagram.com",
+      "facebook.com",
+      "tiktok.com",
+      "netflix.com",
+      "twitch.tv"
+    ].join("\n");
+  }
+
+  if (data.mixedDomains && Array.isArray(data.mixedDomains)) {
+    mixedlistInput.value = data.mixedDomains.join("\n");
+  } else {
+    mixedlistInput.value = ["youtube.com", "reddit.com"].join("\n");
   }
 
   workDuration.value = data.workDuration || 25;
@@ -39,25 +57,26 @@ showTokenBtn.addEventListener("click", () => {
   }
 });
 
-// Save settings
-saveBtn.addEventListener("click", async () => {
-  // Parse blocklist entries
-  const rawLines = blocklistInput.value.split("\n");
-  const cleanedDomains = rawLines
+function parseDomainList(text) {
+  return text
+    .split("\n")
     .map((line) => {
       let val = line.trim().toLowerCase();
-      // Strip protocols and paths if user pasted full URLs
       val = val.replace(/^https?:\/\//i, "");
       val = val.replace(/\/.*$/, "");
       return val;
     })
     .filter((domain) => domain.length > 0 && domain.includes("."));
+}
 
-  // Remove duplicates
-  const uniqueDomains = Array.from(new Set(cleanedDomains));
+// Save settings
+saveBtn.addEventListener("click", async () => {
+  const alwaysBlocked = Array.from(new Set(parseDomainList(blocklistInput.value)));
+  const mixedBlocked = Array.from(new Set(parseDomainList(mixedlistInput.value)));
 
   await chrome.storage.local.set({
-    blockedDomains: uniqueDomains,
+    blockedDomains: alwaysBlocked,
+    mixedDomains: mixedBlocked,
     workDuration: Math.max(1, parseInt(workDuration.value, 10) || 25),
     breakDuration: Math.max(1, parseInt(breakDuration.value, 10) || 5),
     authToken: authTokenInput.value.trim()

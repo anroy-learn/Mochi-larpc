@@ -1,5 +1,5 @@
 /**
- * Tab Pet Popup Controller
+ * Tab Pet Popup Controller with AI Focus Goal and Pet's Notes
  */
 
 const sessionBadge = document.getElementById("sessionBadge");
@@ -12,8 +12,17 @@ const statBlocks = document.getElementById("statBlocks");
 const statFocus = document.getElementById("statFocus");
 const statStreak = document.getElementById("statStreak");
 
+const focusGoalInput = document.getElementById("focusGoalInput");
 const soundToggle = document.getElementById("soundToggle");
+const localOnlyToggle = document.getElementById("localOnlyToggle");
 const connectionStatus = document.getElementById("connectionStatus");
+const aiStatus = document.getElementById("aiStatus");
+
+const trustBadge = document.getElementById("trustBadge");
+const notesSaves = document.getElementById("notesSaves");
+const notesBlocks = document.getElementById("notesBlocks");
+const notesPleas = document.getElementById("notesPleas");
+const recentEventsList = document.getElementById("recentEventsList");
 
 let timerInterval = null;
 
@@ -23,14 +32,55 @@ async function checkServerConnection() {
     const port = wsPort || 8765;
     const resp = await fetch(`http://127.0.0.1:${port}/health`);
     if (resp.ok) {
+      const data = await resp.json();
       connectionStatus.textContent = "Overlay Connected";
       connectionStatus.className = "status-badge connected";
+
+      if (data.local_only) {
+        aiStatus.textContent = "Local Only";
+        aiStatus.classList.remove("hidden");
+      } else if (data.ai_offline) {
+        aiStatus.textContent = "Offline Mode";
+        aiStatus.classList.remove("hidden");
+      } else {
+        aiStatus.classList.add("hidden");
+      }
+
+      loadPetNotes(port);
       return;
     }
   } catch (_) {}
 
   connectionStatus.textContent = "Overlay Offline";
   connectionStatus.className = "status-badge disconnected";
+  aiStatus.textContent = "Offline Mode";
+  aiStatus.classList.remove("hidden");
+}
+
+async function loadPetNotes(port) {
+  try {
+    const resp = await fetch(`http://127.0.0.1:${port}/notes`);
+    if (resp.ok) {
+      const notes = await resp.json();
+      const moodCapitalized = (notes.mood || "neutral").charAt(0).toUpperCase() + (notes.mood || "neutral").slice(1);
+      trustBadge.textContent = `Trust: ${notes.trust_score}% • ${moodCapitalized}`;
+      notesSaves.textContent = notes.saves || 0;
+      notesBlocks.textContent = notes.blocks || 0;
+      notesPleas.textContent = notes.pleas_granted || 0;
+
+      const events = notes.recent_events || [];
+      if (events.length > 0) {
+        recentEventsList.innerHTML = events.map(e => `
+          <div class="event-item">
+            <span class="event-domain" title="${e.title || ''}">${e.domain}</span>
+            <span class="event-tag ${e.verdict}">${e.verdict}</span>
+          </div>
+        `).join("");
+      } else {
+        recentEventsList.innerHTML = `<div class="event-empty">No recent events yet. Stay focused!</div>`;
+      }
+    }
+  } catch (_) {}
 }
 
 function formatTime(totalSeconds) {
@@ -46,7 +96,9 @@ async function renderState() {
     "workDuration",
     "breakDuration",
     "stats",
-    "soundEnabled"
+    "soundEnabled",
+    "focusGoal",
+    "localOnly"
   ]);
 
   const mode = data.pomodoroMode || "idle";
@@ -55,6 +107,10 @@ async function renderState() {
   const breakDuration = data.breakDuration || 5;
 
   soundToggle.checked = data.soundEnabled !== false;
+  localOnlyToggle.checked = data.localOnly === true;
+  if (data.focusGoal) {
+    focusGoalInput.value = data.focusGoal;
+  }
 
   // Stats
   const stats = data.stats || {};
@@ -69,18 +125,21 @@ async function renderState() {
     startWorkBtn.classList.add("hidden");
     startBreakBtn.classList.add("hidden");
     stopBtn.classList.remove("hidden");
+    focusGoalInput.disabled = true;
   } else if (mode === "break") {
     sessionBadge.textContent = "Break Time (Free Browsing)";
     sessionBadge.className = "session-badge break";
     startWorkBtn.classList.add("hidden");
     startBreakBtn.classList.add("hidden");
     stopBtn.classList.remove("hidden");
+    focusGoalInput.disabled = false;
   } else {
     sessionBadge.textContent = "Ready to Focus";
     sessionBadge.className = "session-badge idle";
     startWorkBtn.classList.remove("hidden");
     startBreakBtn.classList.remove("hidden");
     stopBtn.classList.add("hidden");
+    focusGoalInput.disabled = false;
     timeDisplay.textContent = `${String(workDuration).padStart(2, "0")}:00`;
   }
 
@@ -100,59 +159,36 @@ function updateCountdown(endTime) {
     renderState();
     return;
   }
-  const remainingSec = Math.ceil(remainingMs / 1000);
-  timeDisplay.textContent = formatTime(remainingSec);
+  const totalSeconds = Math.ceil(remainingMs / 1000);
+  timeDisplay.textContent = formatTime(totalSeconds);
 }
 
-function playProceduralSound(type = "chime") {
-  chrome.storage.local.get(["soundEnabled"], (res) => {
-    if (res.soundEnabled === false) return;
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-
-      if (type === "chime") {
-        // Two-tone cheerful focus chime (C5 -> G5)
-        const notes = [523.25, 783.99];
-        notes.forEach((freq, i) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          const start = ctx.currentTime + i * 0.12;
-          osc.type = "sine";
-          osc.frequency.setValueAtTime(freq, start);
-          gain.gain.setValueAtTime(0.15, start);
-          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.3);
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.start(start);
-          osc.stop(start + 0.32);
-        });
-      }
-    } catch (_) {}
-  });
-}
-
-// Controls
+// -------------------------------------------------------------
+// Button Handlers
+// -------------------------------------------------------------
 startWorkBtn.addEventListener("click", async () => {
-  const { workDuration } = await chrome.storage.local.get(["workDuration"]);
-  const mins = workDuration || 25;
-  const endTime = Date.now() + mins * 60 * 1000;
+  const data = await chrome.storage.local.get(["workDuration"]);
+  const minutes = Number(data.workDuration || 25);
+  const endTime = Date.now() + minutes * 60 * 1000;
+  const goal = focusGoalInput.value.trim();
 
   await chrome.storage.local.set({
     pomodoroMode: "work",
-    pomodoroEndTime: endTime
+    pomodoroEndTime: endTime,
+    focusGoal: goal
   });
 
-  playProceduralSound("chime");
+  // Sync goal with Python app
+  chrome.runtime.sendMessage({ action: "set_goal", goal });
+
   chrome.alarms.create("tab_pet_pomodoro", { when: endTime });
   renderState();
 });
 
 startBreakBtn.addEventListener("click", async () => {
-  const { breakDuration } = await chrome.storage.local.get(["breakDuration"]);
-  const mins = breakDuration || 5;
-  const endTime = Date.now() + mins * 60 * 1000;
+  const data = await chrome.storage.local.get(["breakDuration"]);
+  const minutes = Number(data.breakDuration || 5);
+  const endTime = Date.now() + minutes * 60 * 1000;
 
   await chrome.storage.local.set({
     pomodoroMode: "break",
@@ -164,18 +200,40 @@ startBreakBtn.addEventListener("click", async () => {
 });
 
 stopBtn.addEventListener("click", async () => {
-  await chrome.alarms.clear("tab_pet_pomodoro");
   await chrome.storage.local.set({
     pomodoroMode: "idle",
     pomodoroEndTime: 0
   });
+
+  chrome.alarms.clear("tab_pet_pomodoro");
   renderState();
 });
 
-soundToggle.addEventListener("change", async (e) => {
-  await chrome.storage.local.set({ soundEnabled: e.target.checked });
+soundToggle.addEventListener("change", async () => {
+  await chrome.storage.local.set({ soundEnabled: soundToggle.checked });
 });
 
-// Init
-checkServerConnection();
-renderState();
+localOnlyToggle.addEventListener("change", async () => {
+  const isLocal = localOnlyToggle.checked;
+  await chrome.storage.local.set({ localOnly: isLocal });
+  const { wsPort } = await chrome.storage.local.get(["wsPort"]);
+  const port = wsPort || 8765;
+  fetch(`http://127.0.0.1:${port}/settings/local_only`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ local_only: isLocal })
+  }).catch(() => {});
+  checkServerConnection();
+});
+
+focusGoalInput.addEventListener("change", () => {
+  const goal = focusGoalInput.value.trim();
+  chrome.storage.local.set({ focusGoal: goal });
+  chrome.runtime.sendMessage({ action: "set_goal", goal });
+});
+
+// Initialization
+document.addEventListener("DOMContentLoaded", () => {
+  renderState();
+  checkServerConnection();
+});

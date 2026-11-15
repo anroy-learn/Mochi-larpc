@@ -1,5 +1,7 @@
 import sys
 import time
+import asyncio
+import threading
 from collections import deque
 from typing import Optional, Tuple, Deque
 
@@ -10,14 +12,31 @@ from PySide6.QtWidgets import QWidget
 from overlay.pet import ProceduralPet, PetState
 from overlay.config import ConfigManager
 from overlay.server import ServerBridge, TabPetServer
+from overlay.ai import GeminiPetAI
+from overlay.memory import MemoryStore
 
 
 class BlockedTask:
-    def __init__(self, tab_id: int, tab_index: int, tab_count: int, url: str):
+    def __init__(
+        self,
+        tab_id: int,
+        tab_index: int,
+        tab_count: int,
+        url: str,
+        title: str = "",
+        blocks_today: int = 1,
+        streak_days: int = 1,
+        goal: str = ""
+    ):
         self.tab_id = tab_id
         self.tab_index = tab_index
         self.tab_count = tab_count
         self.url = url
+        self.title = title
+        self.blocks_today = blocks_today
+        self.streak_days = streak_days
+        self.goal = goal
+        self.roast_text = ""
 
 
 class PetOverlayWindow(QWidget):
@@ -26,23 +45,30 @@ class PetOverlayWindow(QWidget):
     Features:
     - Physically lives on the active Chrome tab as an independent desktop character.
     - Moves smoothly across the screen along the tab bar when switching tabs or closing blocked tabs.
-    - NEVER covers the rest of the tab bar (only 76px wide right where it sits).
+    - Expands dynamically only when displaying roast speech bubbles.
     - Fully draggable with the mouse anywhere on screen.
     - Petting interaction: clicking the pet squashes it happily and emits hearts.
+    - Mood expressions synchronized with user Trust Score.
     """
 
     PET_SIZE = 76  # Compact window dimension
+    BUBBLE_WIDTH = 210
+    BUBBLE_HEIGHT = 120
 
     def __init__(
         self,
         config_manager: ConfigManager,
         bridge: Optional[ServerBridge] = None,
-        server: Optional[TabPetServer] = None
+        server: Optional[TabPetServer] = None,
+        ai: Optional[GeminiPetAI] = None,
+        memory: Optional[MemoryStore] = None
     ):
         super().__init__()
         self.config = config_manager
         self.bridge = bridge
         self.server = server
+        self.ai = ai
+        self.memory = memory
 
         # Chrome window reference
         self.chrome_left: int = 0
@@ -58,6 +84,10 @@ class PetOverlayWindow(QWidget):
         self.target_screen_y: float = float(self.chrome_top)
         self.walk_speed: float = 480.0  # Pixels per second
 
+        # Speech bubble expansion state
+        self.is_bubble_active: bool = False
+        self.bubble_shrink_timer: Optional[QTimer] = None
+
         # Dragging state
         self.is_dragging: bool = False
         self.drag_offset = QPoint()
@@ -67,9 +97,10 @@ class PetOverlayWindow(QWidget):
         self.current_blocked_task: Optional[BlockedTask] = None
 
         # Procedural pet renderer (centered in the 76x76 canvas)
-        # Ground at y = 62
         self.pet = ProceduralPet(x=self.PET_SIZE / 2.0, y=62.0)
         self.pet.sound_enabled = bool(self.config.get("sound_enabled", True))
+        if self.memory:
+            self.pet.mood = self.memory.get_notes_summary().get("mood", "neutral")
 
         self._init_window()
         self._init_timers()
@@ -112,6 +143,7 @@ class PetOverlayWindow(QWidget):
         self.bridge.tab_activated.connect(self.on_tab_activated)
         self.bridge.blocked_tab_opened.connect(self.on_blocked_tab_opened)
         self.bridge.calibration_updated.connect(self.on_calibration_updated)
+        self.bridge.trust_updated.connect(self.on_trust_updated)
 
     def _on_tick(self) -> None:
         now = time.time()
@@ -124,16 +156,15 @@ class PetOverlayWindow(QWidget):
             dist = abs(dx)
 
             if dist > 3.0:
-                # Walk across tab bar towards target
                 direction = 1 if dx > 0 else -1
                 step = min(dist, self.walk_speed * dt)
                 self.screen_x += direction * step
                 self.pet.facing = direction
                 self.pet.state = PetState.WALK
-                self.move(int(self.screen_x), int(self.screen_y))
+                self._apply_window_position()
             else:
                 self.screen_x = self.target_screen_x
-                self.move(int(self.screen_x), int(self.screen_y))
+                self._apply_window_position()
 
                 # Check if we arrived at a blocked tab
                 if self.current_blocked_task and self.pet.state == PetState.WALK:
@@ -147,6 +178,45 @@ class PetOverlayWindow(QWidget):
 
         # Repaint canvas
         self.update()
+
+    def _apply_window_position(self) -> None:
+        if self.is_bubble_active:
+            # Shift window up and centered so pet remains on tab strip while speech bubble expands above
+            draw_x = self.screen_x - ((self.BUBBLE_WIDTH - self.PET_SIZE) / 2.0)
+            draw_y = self.screen_y - (self.BUBBLE_HEIGHT - self.PET_SIZE)
+            self.move(int(draw_x), int(draw_y))
+        else:
+            self.move(int(self.screen_x), int(self.screen_y))
+
+    # -------------------------------------------------------------
+    # Roast Speech Bubble Expansion
+    # -------------------------------------------------------------
+    def show_roast_bubble(self, roast_text: str, duration: float = 3.5) -> None:
+        self.is_bubble_active = True
+        self.setFixedSize(self.BUBBLE_WIDTH, self.BUBBLE_HEIGHT)
+        self.pet.x = self.BUBBLE_WIDTH / 2.0
+        self.pet.y = 106.0
+        self.pet.target_x = self.pet.x
+        self.pet.target_y = self.pet.y
+        self.pet.show_speech(roast_text, duration=duration)
+        self._apply_window_position()
+
+        if self.bubble_shrink_timer:
+            self.bubble_shrink_timer.stop()
+
+        self.bubble_shrink_timer = QTimer(self)
+        self.bubble_shrink_timer.setSingleShot(True)
+        self.bubble_shrink_timer.timeout.connect(self._shrink_bubble)
+        self.bubble_shrink_timer.start(int((duration + 0.1) * 1000))
+
+    def _shrink_bubble(self) -> None:
+        self.is_bubble_active = False
+        self.setFixedSize(self.PET_SIZE, self.PET_SIZE)
+        self.pet.x = self.PET_SIZE / 2.0
+        self.pet.y = 62.0
+        self.pet.target_x = self.pet.x
+        self.pet.target_y = self.pet.y
+        self._apply_window_position()
 
     # -------------------------------------------------------------
     # Mouse Interactions: Petting and Dragging
@@ -185,14 +255,13 @@ class PetOverlayWindow(QWidget):
     def on_bounds_received(self, left: int, top: int, width: int, height: int, tab_count: int) -> None:
         """Updated Chrome window position and dimensions."""
         self.chrome_left = max(0, left)
-        # Tab bar is directly under the menu bar on macOS
         self.chrome_top = int(self.config.get("tab_offset_y", 18))
         self.chrome_width = max(300, width)
         self.tab_count = max(1, tab_count)
         self.screen_y = float(self.chrome_top)
         self.target_screen_y = self.screen_y
 
-        if not self.is_dragging:
+        if not self.is_dragging and not self.current_blocked_task:
             self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
 
     @Slot(int, int)
@@ -202,13 +271,48 @@ class PetOverlayWindow(QWidget):
             return
         self.move_pet_to_tab(tab_index, tab_count=tab_count, pounce=False)
 
-    @Slot(int, int, int, str, str)
-    def on_blocked_tab_opened(self, tab_id: int, tab_index: int, tab_count: int, url: str, title: str) -> None:
-        """Queue blocked tab: pet marches over to stomp it shut."""
-        print(f"[DesktopPet] 🚨 Blocked tab detected: id={tab_id}, index={tab_index}, url={url}")
-        task = BlockedTask(tab_id, tab_index, tab_count, url)
-        self.blocked_queue.append(task)
+    @Slot(int, str)
+    def on_trust_updated(self, trust_score: int, mood: str) -> None:
+        """Updates pet mood expression when trust changes."""
+        self.pet.mood = mood
 
+    @Slot(int, int, int, str, str, int, int, str)
+    def on_blocked_tab_opened(
+        self,
+        tab_id: int,
+        tab_index: int,
+        tab_count: int,
+        url: str,
+        title: str,
+        blocks_today: int,
+        streak_days: int,
+        goal: str
+    ) -> None:
+        """Queue blocked tab: pet marches over to stomp it shut and deliver roast."""
+        print(f"[DesktopPet] 🚨 Blocked tab: id={tab_id}, index={tab_index}, url={url}, goal='{goal}'")
+        task = BlockedTask(
+            tab_id=tab_id,
+            tab_index=tab_index,
+            tab_count=tab_count,
+            url=url,
+            title=title,
+            blocks_today=blocks_today,
+            streak_days=streak_days,
+            goal=goal
+        )
+
+        # Generate roast in background while pet walks
+        if self.ai:
+            def _async_roast():
+                loop = asyncio.new_event_loop()
+                roast = loop.run_until_complete(
+                    self.ai.generate_roast(title, blocks_today, streak_days, goal)
+                )
+                loop.close()
+                task.roast_text = roast
+            threading.Thread(target=_async_roast, daemon=True).start()
+
+        self.blocked_queue.append(task)
         if not self.current_blocked_task:
             self._process_next_blocked_tab()
 
@@ -225,10 +329,16 @@ class PetOverlayWindow(QWidget):
         self.target_screen_x = self.chrome_left + tab_center_x - (self.PET_SIZE / 2.0)
 
         def on_pounce_finished():
-            print(f"[DesktopPet] 💥 Stomped tab {task.tab_id}! Closing now.")
+            roast = task.roast_text or "Distraction stomped! Back to work."
+            print(f"[DesktopPet] 💥 Stomped tab {task.tab_id}! Roast: {roast}")
+            
+            # Show speech bubble above pet
+            self.show_roast_bubble(roast, duration=3.2)
+
             if self.server:
-                self.server.notify_tab_closed(task.tab_id)
-            QTimer.singleShot(300, self._process_next_blocked_tab)
+                self.server.notify_tab_closed(task.tab_id, roast)
+
+            QTimer.singleShot(3400, self._process_next_blocked_tab)
 
         self.pet.on_pounce_complete = on_pounce_finished
 
@@ -249,7 +359,7 @@ class PetOverlayWindow(QWidget):
         self.target_screen_x = self.chrome_left + tab_center_x - (self.PET_SIZE / 2.0)
 
     def paintEvent(self, event) -> None:
-        """Paints the procedural pet inside its 76x76 transparent canvas."""
+        """Paints the procedural pet inside its transparent canvas."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         self.pet.draw(painter)

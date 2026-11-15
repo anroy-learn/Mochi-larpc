@@ -117,9 +117,21 @@ class ProceduralPet:
         # Sound toggle
         self.sound_enabled: bool = True
 
+        # Mood & Speech bubble
+        self.mood: str = "neutral"  # "proud" | "neutral" | "suspicious"
+        self.speech_bubble_text: str = ""
+        self.speech_bubble_timer: float = 0.0
+        self.speech_bubble_alpha: float = 0.0
+
         # Callbacks
         self.on_reach_target = None
         self.on_pounce_complete = None
+
+    def show_speech(self, text: str, duration: float = 3.5) -> None:
+        """Displays a speech bubble with the roast above the pet."""
+        self.speech_bubble_text = text
+        self.speech_bubble_timer = duration
+        self.speech_bubble_alpha = 1.0
 
     def pet_touch(self) -> None:
         """User clicked or petted the pet! Play a happy squish and emit hearts."""
@@ -185,6 +197,15 @@ class ProceduralPet:
     def update(self, dt: float) -> None:
         """Updates animation state, physics, and idle logic."""
         self.state_time += dt
+
+        # Update speech bubble
+        if self.speech_bubble_timer > 0:
+            self.speech_bubble_timer -= dt
+            if self.speech_bubble_timer < 0.6:
+                self.speech_bubble_alpha = max(0.0, self.speech_bubble_timer / 0.6)
+            if self.speech_bubble_timer <= 0:
+                self.speech_bubble_text = ""
+                self.speech_bubble_alpha = 0.0
 
         # Update floating particles
         self.particles = [p for p in self.particles if p.update(dt)]
@@ -486,6 +507,56 @@ class ProceduralPet:
 
         painter.restore()
 
+        # 3. Speech Bubble with Roast
+        self._draw_speech_bubble(painter)
+
+    def _draw_speech_bubble(self, painter: QPainter) -> None:
+        if not self.speech_bubble_text or self.speech_bubble_alpha <= 0:
+            return
+
+        painter.save()
+        alpha = int(255 * self.speech_bubble_alpha)
+
+        bw = 190.0
+        bh = 46.0
+        bx = self.x - (bw / 2.0)
+        by = self.y - self.height - bh - 14.0
+
+        # Soft shadow
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(0, 0, 0, int(35 * self.speech_bubble_alpha)))
+        painter.drawRoundedRect(QRectF(bx + 1, by + 2, bw, bh), 9.0, 9.0)
+
+        # Bubble body
+        painter.setBrush(QColor(255, 255, 255, alpha))
+        painter.setPen(QPen(QColor(230, 90, 60, alpha), 1.5))
+        painter.drawRoundedRect(QRectF(bx, by, bw, bh), 9.0, 9.0)
+
+        # Tail
+        tail = QPainterPath()
+        tail.moveTo(self.x - 6.0, by + bh)
+        tail.lineTo(self.x, by + bh + 7.0)
+        tail.lineTo(self.x + 6.0, by + bh)
+        tail.closeSubpath()
+        painter.setBrush(QColor(255, 255, 255, alpha))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPath(tail)
+        painter.setPen(QPen(QColor(230, 90, 60, alpha), 1.5))
+        painter.drawLine(QPointF(self.x - 6.0, by + bh), QPointF(self.x, by + bh + 7.0))
+        painter.drawLine(QPointF(self.x + 6.0, by + bh), QPointF(self.x, by + bh + 7.0))
+
+        # Text
+        painter.setPen(QColor(25, 30, 36, alpha))
+        font = QFont("Helvetica", 9, QFont.Weight.Bold)
+        painter.setFont(font)
+        text_rect = QRectF(bx + 8, by + 4, bw - 16, bh - 8)
+        painter.drawText(
+            text_rect,
+            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+            self.speech_bubble_text
+        )
+        painter.restore()
+
     def _draw_face(self, painter: QPainter, pw: float, ph: float) -> None:
         eye_y = -ph * 0.55
         eye_spacing = pw * 0.24
@@ -528,11 +599,22 @@ class ProceduralPet:
             )
             painter.drawEllipse(r_rect)
 
-            # Highlights
+            # Highlights & Mood sparkles
             painter.setBrush(Qt.GlobalColor.white)
             sparkle_r = 1.4
             painter.drawEllipse(QRectF(l_rect.x() + 1.2, l_rect.y() + 1.0, sparkle_r * 2, sparkle_r * 2))
             painter.drawEllipse(QRectF(r_rect.x() + 1.2, r_rect.y() + 1.0, sparkle_r * 2, sparkle_r * 2))
+
+            if self.mood == "proud":
+                # Extra proud twinkle
+                painter.drawEllipse(QRectF(l_rect.x() + 2.8, l_rect.y() + 2.8, 1.2, 1.2))
+                painter.drawEllipse(QRectF(r_rect.x() + 2.8, r_rect.y() + 2.8, 1.2, 1.2))
+            elif self.mood == "suspicious":
+                # Suspicious squint brow line
+                pen_brow = QPen(QColor(180, 50, 30, 180), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+                painter.setPen(pen_brow)
+                painter.drawLine(QPointF(-eye_spacing - 3.0, eye_y - 2.5), QPointF(-eye_spacing + 3.0, eye_y - 1.5))
+                painter.drawLine(QPointF(eye_spacing - 3.0, eye_y - 1.5), QPointF(eye_spacing + 3.0, eye_y - 2.5))
 
         # Mouth :3
         pen_mouth = QPen(QColor(80, 50, 40, 180), 1.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
