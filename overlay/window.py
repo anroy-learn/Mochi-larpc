@@ -82,7 +82,7 @@ class PetOverlayWindow(QWidget):
     directly over the Chrome tab bar.
     """
 
-    STRIP_HEIGHT = 70  # Height of the overlay strip above the tab line
+    STRIP_HEIGHT = 60  # Height of the overlay strip over Chrome tabs
 
     def __init__(
         self,
@@ -105,9 +105,9 @@ class PetOverlayWindow(QWidget):
         self.current_blocked_task: Optional[BlockedTask] = None
 
         # Setup pet and position
-        tab_y_offset = float(self.config.get("tab_offset_y", 14))
+        tab_y_offset = float(self.config.get("tab_offset_y", 20))
         self.pet_ground_y = float(self.STRIP_HEIGHT - tab_y_offset)
-        self.pet = ProceduralPet(x=120.0, y=self.pet_ground_y)
+        self.pet = ProceduralPet(x=160.0, y=self.pet_ground_y)
         self.pet.sound_enabled = bool(self.config.get("sound_enabled", True))
 
         self._init_window()
@@ -181,10 +181,8 @@ class PetOverlayWindow(QWidget):
         """Follows Chrome window bounds live."""
         # Sanity check: clamp to visible screen area so it never jumps offscreen
         left = max(0, left)
-        if top >= 80:
-            top = 30
-        else:
-            top = max(28, top)
+        # Position overlay directly over the Chrome tab strip
+        top = 22
 
         width = max(300, min(1512, width))
 
@@ -192,6 +190,7 @@ class PetOverlayWindow(QWidget):
         self.tab_count = max(1, tab_count)
 
         self.setGeometry(left, top, width, self.STRIP_HEIGHT)
+        self.raise_()
         self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
 
     @Slot(int, int)

@@ -8,11 +8,11 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "auth_token": "",
     "host": "127.0.0.1",
     "port": 8765,
-    "tab_offset_x": 80,       # Distance from window left to first tab (clears macOS window buttons)
-    "tab_offset_y": 14,       # Vertical offset where pet rests on the tab strip
-    "max_tab_width": 240,     # Maximum Chrome tab width
+    "tab_offset_x": 75,       # Distance from window left to first tab (clears macOS traffic lights)
+    "tab_offset_y": 24,       # Vertical offset so pet rests directly on the tab bar line
+    "max_tab_width": 165,     # Standard Chrome tab width (~165px)
     "min_tab_width": 45,      # Minimum tab width when many tabs are open
-    "tab_right_margin": 120,  # Space reserved for tab search, new tab (+), window controls
+    "tab_right_margin": 140,  # Space reserved for tab search, new tab (+), window controls
     "pet_name": "Mochi",
     "pet_color": "#FF8A65",   # Warm cute coral
     "pet_secondary": "#FFD54F", # Soft sunny accent
