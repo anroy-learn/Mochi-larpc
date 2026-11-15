@@ -1,0 +1,77 @@
+#tab-pet-browser-companion {
+  position: fixed !important;
+  top: 14px !important;
+  right: 28px !important;
+  z-index: 2147483640 !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  background: rgba(26, 29, 36, 0.92) !important;
+  border: 1px solid rgba(255, 138, 101, 0.45) !important;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35), 0 0 10px rgba(255, 138, 101, 0.2) !important;
+  padding: 6px 14px 6px 10px !important;
+  border-radius: 20px !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  user-select: none !important;
+  backdrop-filter: blur(10px) !important;
+  cursor: grab !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+#tab-pet-browser-companion:hover {
+  transform: translateY(-1px) scale(1.02) !important;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.45), 0 0 15px rgba(255, 138, 101, 0.35) !important;
+}
+
+#tab-pet-browser-companion:active {
+  cursor: grabbing !important;
+  transform: scale(0.98) !important;
+}
+
+.tab-pet-dom-avatar {
+  width: 32px !important;
+  height: 32px !important;
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.tab-pet-dom-canvas {
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.tab-pet-dom-info {
+  display: flex !important;
+  flex-direction: column !important;
+  line-height: 1.15 !important;
+}
+
+.tab-pet-dom-name {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  color: #ff8a65 !important;
+  letter-spacing: 0.2px !important;
+}
+
+.tab-pet-dom-status {
+  font-size: 10px !important;
+  color: #9ca3af !important;
+  font-variant-numeric: tabular-nums !important;
+}
+
+.tab-pet-floating-heart {
+  position: fixed !important;
+  color: #ff5277 !important;
+  font-size: 16px !important;
+  pointer-events: none !important;
+  z-index: 2147483645 !important;
+  animation: tabPetHeartFloat 0.8s ease-out forwards !important;
+}
+
+@keyframes tabPetHeartFloat {
+  0% { opacity: 1; transform: translateY(0) scale(0.8); }
+  50% { transform: translateY(-18px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-34px) scale(1.4); }
+}

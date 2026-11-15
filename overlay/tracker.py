@@ -86,6 +86,11 @@ class NativeChromeTracker:
         if width < 200 or height < 100 or left < -2000 or top < -2000:
             return
 
+        # On macOS, Chrome's tab strip is at the top of the Chrome window (y=28-33 below menu bar).
+        # AppleScript sometimes returns the webview content origin (y=121). Clamp tab strip to top of window:
+        if top >= 80:
+            top = 30
+
         # Check for window bounds change
         current_bounds = (left, top, width, height)
         if current_bounds != self.last_bounds or tab_count != self.last_tab_count:

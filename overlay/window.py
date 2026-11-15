@@ -183,7 +183,12 @@ class PetOverlayWindow(QWidget):
         if left < -2000 or top < -2000 or width < 200:
             return
 
-        top = max(0, top)
+        # On macOS, Chrome's tab strip sits right below the menu bar (y ≈ 28-33)
+        if top >= 80:
+            top = 30
+        else:
+            top = max(0, top)
+
         self.chrome_bounds = (left, top, width, height)
         self.tab_count = max(1, tab_count)
 
