@@ -6,7 +6,7 @@ from collections import deque
 from typing import Optional, Tuple, Deque
 
 from PySide6.QtCore import Qt, QTimer, QPoint, QRect, Slot
-from PySide6.QtGui import QPainter, QGuiApplication, QColor, QRegion, QMouseEvent
+from PySide6.QtGui import QPainter, QGuiApplication, QColor
 from PySide6.QtWidgets import QWidget
 
 from overlay.pet import ProceduralPet, PetState
@@ -20,6 +20,7 @@ def configure_macos_window(win_id: int) -> None:
     - setHidesOnDeactivate:NO (prevents Cocoa from hiding the overlay when Chrome is active)
     - setCollectionBehavior (makes pet visible across all Spaces and Fullscreen apps)
     - setLevel (ensures pet floats permanently above Chrome)
+    - setIgnoresMouseEvents:YES (ensures all mouse clicks pass straight to Chrome tabs)
     """
     if sys.platform != "darwin":
         return
@@ -33,7 +34,7 @@ def configure_macos_window(win_id: int) -> None:
         sel_set_hides = objc.sel_registerName(b"setHidesOnDeactivate:")
         sel_set_collection = objc.sel_registerName(b"setCollectionBehavior:")
         sel_set_level = objc.sel_registerName(b"setLevel:")
-        sel_set_can_hide = objc.sel_registerName(b"setCanHide:")
+        sel_set_ignores = objc.sel_registerName(b"setIgnoresMouseEvents:")
 
         # Send [view window] to get the NSWindow
         objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
@@ -48,21 +49,20 @@ def configure_macos_window(win_id: int) -> None:
         objc.objc_msgSend.restype = None
         objc.objc_msgSend(ns_window, sel_set_hides, False)
 
-        # 2. Do not let OS hide it
-        try:
-            objc.objc_msgSend(ns_window, sel_set_can_hide, False)
-        except Exception:
-            pass
-
-        # 3. CanJoinAllSpaces (1) | FullScreenAuxiliary (256) = 257
+        # 2. CanJoinAllSpaces (1) | FullScreenAuxiliary (256)
         objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_ulong]
         objc.objc_msgSend.restype = None
         objc.objc_msgSend(ns_window, sel_set_collection, 1 | 256)
 
-        # 4. Floating / Status Window Level (25)
+        # 3. Status Window Level (25) - stays on top of Chrome at all times
         objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_long]
         objc.objc_msgSend.restype = None
         objc.objc_msgSend(ns_window, sel_set_level, 25)
+
+        # 4. Pass mouse clicks through to Chrome tabs beneath the pet
+        objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_bool]
+        objc.objc_msgSend.restype = None
+        objc.objc_msgSend(ns_window, sel_set_ignores, True)
 
     except Exception as e:
         print(f"[Overlay] Native macOS window setup warning: {e}")
@@ -78,12 +78,8 @@ class BlockedTask:
 
 class PetOverlayWindow(QWidget):
     """
-    Transparent, always-on-top overlay window that sits directly over the Chrome tab bar.
-    Features:
-    - Smart Dynamic Hit-Testing:
-      Clicks ON the pet touch/pet/drag the pet.
-      Clicks OUTSIDE the pet pass 100% through to Chrome tabs beneath it!
-    - Permanent visibility on macOS (doesn't hide on deactivate).
+    Transparent, click-through, always-on-top overlay window that sits
+    directly over the Chrome tab bar.
     """
 
     STRIP_HEIGHT = 70  # Height of the overlay strip above the tab line
@@ -104,10 +100,6 @@ class PetOverlayWindow(QWidget):
         self.tab_count: int = 1
         self.active_tab_index: int = 0
 
-        # Dragging state
-        self.is_dragging_pet: bool = False
-        self.drag_offset_x: float = 0.0
-
         # Blocked tabs queue
         self.blocked_queue: Deque[BlockedTask] = deque()
         self.current_blocked_task: Optional[BlockedTask] = None
@@ -124,10 +116,10 @@ class PetOverlayWindow(QWidget):
 
     def _init_window(self) -> None:
         """Sets window flags for transparent, always-on-top overlay."""
-        # Crucial: NO Qt.WindowType.Tool (which causes Cocoa NSPanels to auto-hide on deactivate)
         flags = (
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
+            | Qt.WindowType.WindowTransparentForInput
         )
         self.setWindowFlags(flags)
 
@@ -140,21 +132,19 @@ class PetOverlayWindow(QWidget):
         screen = QGuiApplication.primaryScreen()
         if screen:
             screen_geo = screen.geometry()
-            default_w = min(1280, screen_geo.width() - 80)
-            default_x = (screen_geo.width() - default_w) // 2
-            default_y = 25  # Below macOS menu bar
+            default_w = min(1512, screen_geo.width())
+            default_x = 0
+            default_y = 30  # Sits right on Chrome tab bar below menu bar
             self.setGeometry(default_x, default_y, default_w, self.STRIP_HEIGHT)
         else:
-            self.setGeometry(100, 30, 1000, self.STRIP_HEIGHT)
+            self.setGeometry(0, 30, 1200, self.STRIP_HEIGHT)
 
         self.setWindowTitle("TabPetOverlay")
-        self._update_click_mask()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
         # Apply macOS Cocoa native window configuration
         configure_macos_window(int(self.winId()))
-        self._update_click_mask()
 
     def _init_timers(self) -> None:
         """60 FPS render and animation update loop."""
@@ -172,25 +162,6 @@ class PetOverlayWindow(QWidget):
         self.bridge.blocked_tab_opened.connect(self.on_blocked_tab_opened)
         self.bridge.calibration_updated.connect(self.on_calibration_updated)
 
-    def get_pet_hitbox(self) -> QRect:
-        """Returns the clickable bounding box of the pet."""
-        box_w = int(self.pet.width * 1.3)
-        box_h = int(self.pet.height * 1.3)
-        box_x = int(self.pet.x - (box_w / 2.0))
-        box_y = int(self.pet.y - box_h)
-        return QRect(box_x, box_y, box_w, box_h)
-
-    def _update_click_mask(self) -> None:
-        """
-        Dynamically shapes the window hit-test mask to ONLY the pet's hitbox.
-        - Mouse clicks ON the pet hit the pet (for touching, petting, and dragging).
-        - Mouse clicks OUTSIDE the pet pass 100% straight through to Chrome tabs below!
-        """
-        hitbox = self.get_pet_hitbox()
-        # Ensure mask is within window boundaries
-        hitbox = hitbox.intersected(self.rect())
-        self.setMask(QRegion(hitbox))
-
     def _on_tick(self) -> None:
         now = time.time()
         dt = min(0.05, now - self.last_update_time)
@@ -199,39 +170,8 @@ class PetOverlayWindow(QWidget):
         # Update pet physics and animations
         self.pet.update(dt)
 
-        # Update hit mask to follow moving pet
-        self._update_click_mask()
-
         # Repaint canvas
         self.update()
-
-    # -------------------------------------------------------------
-    # Mouse Interaction: Touch, Pet, and Drag
-    # -------------------------------------------------------------
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            self.pet.pet_touch()
-            self.is_dragging_pet = True
-            self.drag_offset_x = self.pet.x - event.position().x()
-            self.update()
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if self.is_dragging_pet:
-            new_x = max(25.0, min(float(self.width() - 30), event.position().x() + self.drag_offset_x))
-            self.pet.start_drag()
-            self.pet.drag_to(new_x)
-            self._update_click_mask()
-            self.update()
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        if self.is_dragging_pet:
-            self.is_dragging_pet = False
-            self.pet.end_drag(self.pet_ground_y)
-            self._update_click_mask()
-            self.update()
-        super().mouseReleaseEvent(event)
 
     # -------------------------------------------------------------
     # Slots & Signal Handlers
@@ -249,12 +189,11 @@ class PetOverlayWindow(QWidget):
 
         self.setGeometry(left, top, max(300, width), self.STRIP_HEIGHT)
         self.move_pet_to_tab(self.active_tab_index, self.tab_count, pounce=False)
-        self._update_click_mask()
 
     @Slot(int, int)
     def on_tab_activated(self, tab_index: int, tab_count: int) -> None:
         """Hops to the active tab index if not currently busy closing a blocked tab."""
-        if self.is_dragging_pet or self.current_blocked_task or len(self.blocked_queue) > 0:
+        if self.current_blocked_task or len(self.blocked_queue) > 0:
             return
 
         self.move_pet_to_tab(tab_index, tab_count=tab_count, pounce=False)
@@ -299,7 +238,6 @@ class PetOverlayWindow(QWidget):
         self.pet.y = self.pet_ground_y
         self.pet.target_y = self.pet_ground_y
         self.pet.sound_enabled = bool(self.config.get("sound_enabled", True))
-        self._update_click_mask()
 
     def move_pet_to_tab(self, tab_index: int, tab_count: Optional[int] = None, pounce: bool = False) -> None:
         """Commands pet to navigate to a specific tab index."""

@@ -49,6 +49,15 @@ class ConfigManager:
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=2)
+            
+            # Sync token directly into extension/config.json for automatic zero-config extension auth
+            ext_config = Path(__file__).resolve().parent.parent / "extension" / "config.json"
+            if ext_config.parent.exists():
+                with open(ext_config, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "authToken": self.config.get("auth_token", ""),
+                        "wsPort": self.config.get("port", 8765)
+                    }, f, indent=2)
         except Exception as e:
             print(f"[Config] Error saving config: {e}")
 

@@ -86,18 +86,32 @@ async function initWebSocket() {
     return;
   }
 
-  const { authToken, wsPort } = await chrome.storage.local.get(["authToken", "wsPort"]);
-  const port = wsPort || 8765;
+  let { authToken, wsPort } = await chrome.storage.local.get(["authToken", "wsPort"]);
 
-  let token = authToken;
-  if (!token) {
-    // Attempt auto-discovery
+  // 1. Check bundled extension/config.json
+  if (!authToken) {
+    try {
+      const resp = await fetch(chrome.runtime.getURL("config.json"));
+      if (resp.ok) {
+        const cfg = await resp.json();
+        if (cfg.authToken) {
+          authToken = cfg.authToken;
+          wsPort = cfg.wsPort || 8765;
+          await chrome.storage.local.set({ authToken, wsPort });
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Fallback: query local server /token
+  const port = wsPort || 8765;
+  if (!authToken) {
     try {
       const resp = await fetch(`http://127.0.0.1:${port}/token`);
       if (resp.ok) {
         const data = await resp.json();
-        token = data.auth_token;
-        await chrome.storage.local.set({ authToken: token });
+        authToken = data.auth_token;
+        await chrome.storage.local.set({ authToken });
       }
     } catch (_) {}
   }
